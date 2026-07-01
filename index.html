@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset=utf-8>
+<title>Plotter3D</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+  #stage { position: fixed; inset: 0; }
+  #panel { position: fixed; top: 12px; left: 12px; padding: 10px 12px;
+    background: rgba(255,255,255,0.92); border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15); font-size: 13px; }
+  #panel button { padding: 5px 12px; font-size: 13px; cursor: pointer; margin-right: 6px; }
+  #hint { color: #555; }
+#panel .row { margin-bottom: 8px; display: flex; gap: 10px; align-items: center; }
+#panel label { display: flex; gap: 4px; align-items: center; color: #555; }
+#layers { display: flex; flex-direction: column; gap: 4px; max-width: 220px; }
+.layer-row { display: flex; align-items: center; gap: 6px; }
+.layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
+.layer-row input[type=color]:disabled { opacity: 0.35; cursor: not-allowed; }
+.layer-name { color: #333; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#recent { margin-top: 10px; display: none; }
+.recent-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
+.recent-item { display: block; width: 100%; max-width: 220px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; margin: 2px 0; font-size: 12px; cursor: pointer; background: #f3f5f7; border: 1px solid #dde2e6; border-radius: 4px; }
+.recent-item:hover { background: #e7ebef; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id=stage></div>
+<div id=panel>
+  <div id=hint>Drop an SVG file anywhere to load it onto the plotter</div>
+  <div id=controls style="display:none">
+    <div class=row>
+      <button id=playBtn>▶ Plot</button>
+      <button id=resetBtn>Reset</button>
+      <button id=muteBtn title="Mute / unmute sound">🔊</button>
+    </div>
+    <div class=row>
+      <label>Speed
+        <select id=speedSel>
+          <option value=1 selected>1×</option>
+          <option value=5>5×</option>
+          <option value=20>20×</option>
+          <option value=100>100×</option>
+          <option value=1000>1000×</option>
+        </select>
+      </label>
+      <label>Plot
+        <select id=layerSel><option value=all>All layers</option></select>
+      </label>
+    </div>
+    <div id=layers></div>
+  </div>
+  <div id=recent></div>
+</div>
+
+<script type="module">
+import { createScene } from './scene.js';
+import { extractStrokes } from './plotExtract.js';
+import { PlotSim } from './sim.js';
+import { createAudio } from './audio.js';
+
+const scene = createScene(document.getElementById('stage'));
+const sim = new PlotSim();
+const audio = createAudio();
+const hint = document.getElementById('hint');
+const controls = document.getElementById('controls');
+const playBtn = document.getElementById('playBtn');
+const resetBtn = document.getElementById('resetBtn');
+
+let speed = 1;   // sim time multiplier (set by the Speed control)
+let loaded = false;
+
+// Pen position is tracked here so the animation loop can derive per-axis speed
+// for the motor sounds; a pen up/down change triggers the servo blip.
+let penX = 0, penY = 0, penDownPrev = false;
+audio.setEnabled(speed === 1);   // sound only plays at realtime (1x)
+
+sim.onPose = (x, y, down) => {
+  scene.setPenPose(x, y, down);
+  penX = x; penY = y;
+  if (down !== penDownPrev) { penDownPrev = down; audio.penMove(down); }
+};
+sim.onInk = (ax, ay, bx, by, c) => scene.inkSegment(ax, ay, bx, by, c);
+sim.onPenColor = (c) => scene.setPenColor(c);
+sim.onComplete = () => { playBtn.textContent = '▶ Plot'; setSwatchesEnabled(true); };
+
+function loadSvgText(text, name) {
+  let data;
+  try { data = extractStrokes(text); }
+  catch (e) { hint.textContent = 'Could not parse that SVG.'; hint.style.display = ''; return; }
+  if (!data.strokes.length) { hint.textContent = 'No strokes found in that SVG.'; hint.style.display = ''; return; }
+  scene.loadArtwork(data.widthMm, data.heightMm);
+  sim.load(data.strokes, data.strokeLayers, data.layerInfo,
+           { downSpeed: 60, upSpeed: 200, liftMs: 240 });
+  loaded = true;
+  hint.style.display = 'none';
+  controls.style.display = '';
+  playBtn.textContent = '▶ Plot';
+  layerSel.value = 'all';
+  sim.setLayerFilter(null);
+  buildLayerUI(data);
+  saveRecent(name, text);
+}
+
+// --- recently plotted files ---
+// `recentList` is the in-memory source of truth so the list always renders this
+// session even if localStorage is unavailable (e.g. some file:// setups) or a
+// write fails; localStorage is just best-effort persistence across reloads.
+const RECENT_KEY = 'plotter3d.recent';
+const MAX_RECENT = 8;
+const recentDiv = document.getElementById('recent');
+
+function readStored() {
+  try { const v = JSON.parse(localStorage.getItem(RECENT_KEY)); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+}
+let recentList = readStored();
+
+function persistRecent() {
+  let l = recentList.slice();
+  while (l.length) {
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(l)); return; }
+    catch { l.pop(); }            // quota/blocked: shrink and retry
+  }
+  try { localStorage.removeItem(RECENT_KEY); } catch {}
+}
+
+function saveRecent(name, svg) {
+  if (!svg) return;
+  const n = name || 'untitled.svg';
+  recentList = [{ name: n, svg, t: Date.now() },
+                ...recentList.filter(it => it.name !== n)].slice(0, MAX_RECENT);
+  persistRecent();                 // best-effort; UI renders from recentList
+  buildRecentUI();
+}
+
+function buildRecentUI() {
+  recentDiv.innerHTML = '';
+  if (!recentList.length) { recentDiv.style.display = 'none'; return; }
+  recentDiv.style.display = 'block';
+  const head = document.createElement('div');
+  head.className = 'recent-head';
+  head.textContent = 'Recent';
+  recentDiv.appendChild(head);
+  recentList.forEach(it => {
+    const b = document.createElement('button');
+    b.className = 'recent-item';
+    b.textContent = it.name;
+    b.title = it.name;
+    b.addEventListener('click', () => loadSvgText(it.svg, it.name));
+    recentDiv.appendChild(b);
+  });
+}
+buildRecentUI();
+
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = () => loadSvgText(r.result, file.name);
+  r.readAsText(file);
+});
+
+playBtn.addEventListener('click', () => {
+  if (!loaded) return;
+  if (sim.running) { sim.pause(); playBtn.textContent = '▶ Plot'; }
+  else {
+    if (sim.isComplete()) { sim.reset(); scene.resetInk(); }
+    sim.start();
+    audio.resume();              // user gesture — unlock Web Audio
+    playBtn.textContent = '❚❚ Pause';
+    setSwatchesEnabled(false);   // pen colors are locked once a plot is running
+  }
+});
+resetBtn.addEventListener('click', () => {
+  sim.reset();
+  scene.resetInk();
+  playBtn.textContent = '▶ Plot';
+  setSwatchesEnabled(true);
+});
+
+// Sound on/off toggle (persisted). This is independent of the realtime gate,
+// so audio still only plays at 1x AND when un-muted.
+const muteBtn = document.getElementById('muteBtn');
+let muted = false;
+try { muted = localStorage.getItem('plotter3d.muted') === '1'; } catch {}
+function applyMute() {
+  audio.setMuted(muted);
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+}
+applyMute();
+muteBtn.addEventListener('click', () => {
+  muted = !muted;
+  try { localStorage.setItem('plotter3d.muted', muted ? '1' : '0'); } catch {}
+  applyMute();
+});
+
+const speedSel = document.getElementById('speedSel');
+const layerSel = document.getElementById('layerSel');
+const layersDiv = document.getElementById('layers');
+
+// Pen-color swatches are disabled while a plot is in progress (you set the
+// colors up front, like loading pens before a real plot). Re-enabled on
+// reset and when the plot finishes.
+function setSwatchesEnabled(on) {
+  layersDiv.querySelectorAll('input[type=color]').forEach(el => { el.disabled = !on; });
+}
+
+speedSel.addEventListener('change', () => {
+  speed = +speedSel.value;
+  audio.setEnabled(speed === 1);   // mute above realtime
+});
+
+layerSel.addEventListener('change', () => {
+  sim.setLayerFilter(layerSel.value === 'all' ? null : +layerSel.value);
+  scene.resetInk();
+  playBtn.textContent = '▶ Plot';
+});
+
+// Build the layer list + the single-layer <select> after each load.
+function buildLayerUI(data) {
+  layerSel.innerHTML = '<option value=all>All layers</option>';
+  layersDiv.innerHTML = '';
+  data.layerInfo.forEach((l, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = l.name;
+    layerSel.appendChild(opt);
+
+    const row = document.createElement('div');
+    row.className = 'layer-row';
+    const sw = document.createElement('input');
+    sw.type = 'color';
+    sw.value = l.color;
+    sw.addEventListener('input', () => {
+      l.color = sw.value;                 // future ink + pen use the new color
+      scene.setPenColor(sw.value);
+    });
+    const name = document.createElement('span');
+    name.className = 'layer-name';
+    name.textContent = l.name;
+    row.appendChild(sw);
+    row.appendChild(name);
+    layersDiv.appendChild(row);
+  });
+  layerSel.disabled = data.layerInfo.length < 2;
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(now - last, 100);   // clamp to avoid post-blur jumps
+  last = now;
+  if (sim.running) {
+    const px = penX, py = penY;
+    sim.tick(dt * speed);
+    if (speed === 1) {
+      // Net per-axis movement this frame -> mm/s drives the motor whine.
+      const dtSec = Math.max(dt, 1) / 1000;
+      audio.updateMotors(Math.abs(penX - px) / dtSec, Math.abs(penY - py) / dtSec);
+    } else {
+      audio.silence();
+    }
+  } else {
+    audio.silence();
+  }
+  scene.render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
