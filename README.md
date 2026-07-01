@@ -17,6 +17,9 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 - **Layer colors** — pick a pen color per layer before you start (Inkscape layers
   are detected automatically)
 - **🔊** — mute the motor and servo sounds (they only play at 1× speed anyway)
+- **F** — toggle a free-fly camera: the mouse locks for looking around and
+  WASD + E/Q fly you through the scene; press F (or Esc) to return to orbit
+- **H** — hide/show the whole interface (handy for a clean screenshot)
 
 Recently plotted files are remembered so you can replay them.
 

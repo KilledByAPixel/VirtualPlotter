@@ -1,6 +1,7 @@
 'use strict';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const PAPER_W = 297, PAPER_H = 210;   // A4 landscape, mm
@@ -50,6 +51,58 @@ export function createScene(mount) {
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;   // don't go under the desk
   controls.update();
+
+  // --- free-fly camera ---
+  // Default is orbit; the app toggles this on (press F) for a simple FPS-style
+  // flycam: click locks the mouse, mouse looks (yaw/pitch only — no roll), and
+  // WASD/EQ move at a constant speed with no easing. Only one controller drives
+  // the camera at a time.
+  const FLY_SPEED = 180;                      // mm/s
+  const keyv = { f: 0, b: 0, l: 0, r: 0, u: 0, d: 0 };
+  const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
+  let fly = null, freeCam = false, freeCamCb = () => {};
+
+  function onFlyKey(e, down) {
+    if (!freeCam) return;
+    switch (e.code) {
+      case 'KeyW': keyv.f = down; break;
+      case 'KeyS': keyv.b = down; break;
+      case 'KeyA': keyv.l = down; break;
+      case 'KeyD': keyv.r = down; break;
+      case 'KeyE': case 'Space': keyv.u = down; break;
+      case 'KeyQ': case 'ShiftLeft': keyv.d = down; break;
+      default: return;
+    }
+    e.preventDefault();
+  }
+  addEventListener('keydown', e => onFlyKey(e, 1));
+  addEventListener('keyup', e => onFlyKey(e, 0));
+
+  function setFreeCam(on) {
+    on = !!on;
+    if (on === freeCam) return freeCam;
+    freeCam = on;
+    if (freeCam) {
+      controls.enabled = false;              // hand the camera to the flycam
+      for (const k in keyv) keyv[k] = 0;
+      fly = new PointerLockControls(camera, renderer.domElement);
+      // Esc (or any lost lock) drops back to the orbit camera.
+      fly.addEventListener('unlock', () => setFreeCam(false));
+      fly.lock();                            // grab the pointer (F keypress is the gesture)
+    } else if (fly) {
+      fly.dispose();
+      fly = null;
+      // Resume orbiting around a point in front of wherever we flew to, so the
+      // view doesn't snap when OrbitControls takes back over.
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      controls.target.copy(camera.position).addScaledVector(dir, 200);
+      controls.enabled = true;
+      controls.update();
+    }
+    freeCamCb(freeCam);
+    return freeCam;
+  }
 
   // --- lights ---
   scene.add(new THREE.HemisphereLight('#ffffff', '#9aa7b0', 0.55));
@@ -232,11 +285,24 @@ export function createScene(mount) {
   function setPenColor(c) { penBody.material.color.set(c); }
   function resetInk() { clearInk(); tex.needsUpdate = true; }
 
-  function render() {
+  function render(dtMs = 16) {
     const target = penDownTarget ? PEN_DOWN : PEN_UP;
     penY += (target - penY) * 0.25;          // smooth lift/drop
     penGroup.position.y = penY + PAPER_TOP_Y; // tip rests just above paper
-    controls.update();
+    if (freeCam && fly) {
+      // Constant-speed WASD flight in the look direction; strafe/vertical stay
+      // level. No easing — the camera moves only while a key is held.
+      const d = FLY_SPEED * Math.min(dtMs, 100) / 1000;
+      camera.getWorldDirection(_fwd);
+      _right.crossVectors(_fwd, camera.up).normalize();
+      if (keyv.f) camera.position.addScaledVector(_fwd, d);
+      if (keyv.b) camera.position.addScaledVector(_fwd, -d);
+      if (keyv.r) camera.position.addScaledVector(_right, d);
+      if (keyv.l) camera.position.addScaledVector(_right, -d);
+      camera.position.y += (keyv.u - keyv.d) * d;
+    } else {
+      controls.update();
+    }
     renderer.render(scene, camera);
   }
 
@@ -248,6 +314,8 @@ export function createScene(mount) {
 
   return {
     loadArtwork, setPenPose, inkSegment, setPenColor, resetInk, render,
+    setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
+    onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
   };
 }
