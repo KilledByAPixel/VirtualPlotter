@@ -67,6 +67,21 @@ test('layer filter plots only the selected layer', () => {
   assert.ok(ev.ink.every(s => s[4] === '#c22d2d'));
 });
 
+test('parks the pen back at home (0,0), pen up, after the last stroke', () => {
+  const sim = new PlotSim();
+  sim.load([[[10, 10], [40, 10]]], [0], [{ name: 'a', color: '#000' }],
+           { downSpeed: 100, upSpeed: 200, liftMs: 0 });
+  const ev = runToEnd(sim);
+  const lastPose = ev.pose[ev.pose.length - 1];
+  // Final resting pose is the home corner, pen lifted.
+  assert.deepEqual([lastPose[0], lastPose[1]], [0, 0]);
+  assert.equal(lastPose[2], false);
+  // Home is reached by moving, not teleporting: the pen leaves the stroke end
+  // (40,10) and passes through intermediate points on the way back.
+  const homeward = ev.pose.filter(p => p[2] === false && p[0] < 40 && p[0] > 0);
+  assert.ok(homeward.length > 0, 'expected animated travel back to home');
+});
+
 test('reset returns to a fresh, incomplete, non-running state', () => {
   const sim = new PlotSim();
   sim.load([[[0, 0], [10, 0]]], [0], [{ name: 'a', color: '#000' }],

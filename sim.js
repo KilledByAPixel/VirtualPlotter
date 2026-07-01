@@ -51,6 +51,7 @@ export class PlotSim {
     this._liftRemain = 0;
     this._curColor = null;
     this._curLayer = null;
+    this._homing = false;
     this._travelTarget = this._firstPoint(0);
     this.onPose(this._penPos[0], this._penPos[1], false);
   }
@@ -74,13 +75,13 @@ export class PlotSim {
         const t = this._travelTarget;
         if (!t) { this.done = true; break; }
         const segLen = dist(this._penPos[0], this._penPos[1], t[0], t[1]);
-        if (segLen === 0) { this._startDrop(); continue; }
+        if (segLen === 0) { this._arriveTravel(); continue; }
         const need = segLen / (this.upSpeed / 1000);
         if (remaining >= need) {
           this._penPos = [t[0], t[1]];
           remaining -= need;
           this.onPose(t[0], t[1], false);
-          this._startDrop();
+          this._arriveTravel();
         } else {
           const f = (remaining * (this.upSpeed / 1000)) / segLen;
           this._penPos = [this._penPos[0] + (t[0] - this._penPos[0]) * f,
@@ -140,9 +141,23 @@ export class PlotSim {
 
   _beginDraw() { this._mode = 'draw'; this._segIdx = 0; }
 
+  // Reached a travel target with the pen up. Either drop to draw the next
+  // stroke, or — if this was the final return-home move — finish.
+  _arriveTravel() {
+    if (this._homing) { this.done = true; return; }
+    this._startDrop();
+  }
+
   _afterLift() {
     this._pos++;
-    if (this._pos >= this._order.length) { this.done = true; return; }
+    if (this._pos >= this._order.length) {
+      // All strokes drawn: park the pen back at the home corner with a normal
+      // pen-up travel move before finishing, the same way a real plotter does.
+      this._mode = 'travel';
+      this._homing = true;
+      this._travelTarget = [0, 0];
+      return;
+    }
     this._mode = 'travel';
     this._travelTarget = this._firstPoint(this._pos);
   }
