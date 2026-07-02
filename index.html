@@ -126,6 +126,10 @@ let penState = {};
 try { penState = JSON.parse(localStorage.getItem(PEN_KEY)) || {}; } catch {}
 if (typeof penState !== 'object' || !penState || Array.isArray(penState)) penState = {};
 for (const p of PENS) penState[p.id] = { ink: 1, ...penState[p.id] };
+const TIP_SIZES = [0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+for (const p of PENS)
+  if ('tip' in penState[p.id] && !TIP_SIZES.includes(penState[p.id].tip))
+    delete penState[p.id].tip;   // corrupt/legacy override: fall back to default
 function persistPens() {
   try { localStorage.setItem(PEN_KEY, JSON.stringify(penState)); } catch {}
 }
@@ -268,6 +272,7 @@ sim.onComplete = () => {
   setSwatchesEnabled(true);
   if (activePenId) syncPen(activePenId);
   if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
+  refreshPanel();
 };
 
 function loadSvgText(text, name) {
@@ -285,6 +290,7 @@ function loadSvgText(text, name) {
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
+  setSwatchesEnabled(true);
   if (activePenId) { syncPen(activePenId); scene.setPenInCaddy(activePenId, true); }
   activePenId = null;
   loaded = true;
@@ -382,6 +388,7 @@ playBtn.addEventListener('click', () => {
     sim.pause();
     playBtn.textContent = '▶ Plot';
     if (activePenId) syncPen(activePenId);
+    refreshPanel();
   }
   else {
     if (sim.isComplete()) { sim.reset(); scene.resetInk(); }
@@ -401,6 +408,7 @@ resetBtn.addEventListener('click', () => {
   playBtn.textContent = '▶ Plot';
   setSwatchesEnabled(true);
   if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
+  refreshPanel();
 });
 
 // Sound on/off toggle (persisted). This is independent of the realtime gate,
@@ -436,7 +444,7 @@ PENS.forEach((p, i) => {
   o.value = p.id; o.textContent = p.name;
   penSel.appendChild(o);
 });
-for (const t of [0.3, 0.5, 0.7, 1.0, 1.5, 2.0]) {
+for (const t of TIP_SIZES) {
   const o = document.createElement('option');
   o.value = String(t); o.textContent = t.toFixed(1) + ' mm';
   tipSel.appendChild(o);
@@ -498,6 +506,7 @@ layerSel.addEventListener('change', () => {
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
+  setSwatchesEnabled(true);
   sim.setLayerFilter(layerSel.value === 'all' ? null : +layerSel.value);
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
@@ -526,7 +535,7 @@ function buildLayerUI(data) {
 }
 
 document.getElementById('penInkColor').addEventListener('input', (e) => {
-  if (!selectedPenId) return;
+  if (!selectedPenId || plotLocked()) return;
   penState[selectedPenId].color = e.target.value;
   persistPens();
   layerPens.forEach((id, i) => {      // layers holding this pen follow it
@@ -548,6 +557,7 @@ paperColor.addEventListener('input', (e) => {
 
 penSel.addEventListener('change', () => selectPen(penSel.value));
 tipSel.addEventListener('change', () => {
+  if (plotLocked()) { refreshPanel(); return; }
   const t = parseFloat(tipSel.value);
   if (t === penDef(selectedPenId).tip) delete penState[selectedPenId].tip;
   else penState[selectedPenId].tip = t;
