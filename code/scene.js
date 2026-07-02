@@ -83,6 +83,7 @@ export function createScene(mount) {
     if (on === freeCam) return freeCam;
     freeCam = on;
     if (freeCam) {
+      clearHover();                          // flying dismisses any stuck tooltip
       controls.enabled = false;              // hand the camera to the flycam
       for (const k in keyv) keyv[k] = 0;
       fly = new PointerLockControls(camera, renderer.domElement);
@@ -137,6 +138,17 @@ export function createScene(mount) {
       hoverCb(u, e.clientX, e.clientY);
     } else if (u) hoverCb(u, e.clientX, e.clientY);
   });
+  function clearHover() {
+    if (hovered == null) return;
+    hovered = null;
+    renderer.domElement.style.cursor = '';
+    hoverCb(null);
+  }
+  // Pointer leaving the canvas (onto the panel overlay, out the window, or a
+  // touch/pen cancel) must dismiss the tooltip too — pointermove won't fire
+  // again to clear it otherwise.
+  renderer.domElement.addEventListener('pointerleave', clearHover);
+  renderer.domElement.addEventListener('pointercancel', clearHover);
 
   // --- lights ---
   scene.add(new THREE.HemisphereLight('#ffffff', '#9aa7b0', 0.55));
