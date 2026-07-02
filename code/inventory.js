@@ -12,7 +12,7 @@ export const PENS = [
   { id: 'gel',     name: 'Gel',        style: 'gel',       tip: 0.7, color: '#f2f2f2', capacityM: 120, opaque: true },
   { id: 'silver',  name: 'Metallic',   style: 'metallic',  tip: 1.0, color: '#b8bcc4', capacityM: 100, opaque: true, sheen: true },
   { id: 'gold',    name: 'Metallic',   style: 'metallic',  tip: 1.0, color: '#c9a83c', capacityM: 100, opaque: true, sheen: true },
-  { id: 'brush',   name: 'Brush',      style: 'brush',     tip: 1.2, tipMin: 0.5, tipMax: 2.5, color: '#1a1a1a', capacityM: 250 },
+  { id: 'brush',   name: 'Brush',      style: 'brush',     tip: 1.0, tipMin: 0.5, tipMax: 2.5, color: '#1a1a1a', capacityM: 250 },
   { id: 'ball',    name: 'Ballpoint',  style: 'ballpoint', tip: 0.5, color: '#20336e', capacityM: 500, dryStartMm: 3, skipChance: 0.03 },
 ];
 export const DEFAULT_PEN = 'fine05';
