@@ -2,11 +2,13 @@
 
 A 3D pen-plotter simulator in the browser. Drop in an SVG and watch a little
 AxiDraw-style machine draw it on virtual paper — arm sliding, pen lifting,
-stepper motors whirring. It doesn't make anything real. It's just nice to watch.
+stepper motors whirring. It doesn't make anything real but it's nice to watch.
+
+# [LIVE DEMO](https://killedbyapixel.github.io/VirtualPlotter/)
 
 ![Virtual Plotter](screenshot.png)
 
-## Use it
+## How To Use
 
 Drag any SVG file onto the page and it loads onto the plotter. Then:
 
@@ -26,30 +28,6 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 Recently plotted files are remembered so you can replay them. On a first
 visit the Recent list starts with a built-in sample, so there's something to
 plot before you have an SVG of your own.
-
-## Run it locally
-
-It's plain HTML + JavaScript with no build step, but it uses ES modules, so it
-needs to be served over HTTP rather than opened as a `file://` URL. Any static
-server works:
-
-```sh
-npx serve
-# or
-python -m http.server
-```
-
-Then open the printed URL and drop in an SVG. [three.js](https://threejs.org/)
-is loaded from a CDN, so you'll need to be online the first time.
-
-## Tests
-
-The plot simulation (`code/sim.js`) has a small unit-test suite that runs on Node
-with no dependencies:
-
-```sh
-node --test
-```
 
 ## License
 
