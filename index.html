@@ -26,6 +26,8 @@
 .recent-item { display: block; width: 100%; max-width: 220px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; margin: 2px 0; font-size: 12px; cursor: pointer; background: #f3f5f7; border: 1px solid #dde2e6; border-radius: 4px; }
 .recent-item:hover { background: #e7ebef; }
 body.ui-hidden #panel { display: none; }
+#tip { position: fixed; background: rgba(20,22,26,0.9); color: #fff; padding: 4px 8px;
+  border-radius: 4px; font-size: 11px; pointer-events: none; display: none; z-index: 10; }
 </style>
 <script type="importmap">
 {
@@ -76,6 +78,7 @@ body.ui-hidden #panel { display: none; }
   </div>
   <div id=recent></div>
 </div>
+<div id=tip></div>
 
 <script type="module">
 import { createScene } from './code/scene.js';
@@ -129,6 +132,7 @@ function syncPen(id) {
   if (!penSims[id]) return;
   penState[id].ink = penSims[id].ink;
   persistPens();
+  scene.setPenLevel(id, penState[id].ink);
 }
 
 let paperSel = { id: DEFAULT_PAPER, color: null };
@@ -140,6 +144,26 @@ function applyPaper() {
   try { localStorage.setItem(PAPER_KEY, JSON.stringify(paperSel)); } catch {}
 }
 applyPaper();
+
+scene.buildInventory(PENS, PAPERS);
+scene.setPaperSelected(paperSel.id);
+PENS.forEach(p => scene.setPenLevel(p.id, penState[p.id].ink));
+
+const tip = document.getElementById('tip');
+scene.onHover((u, x, y) => {
+  if (!u) { tip.style.display = 'none'; return; }
+  tip.style.display = '';
+  tip.style.left = (x + 14) + 'px';
+  tip.style.top = (y + 10) + 'px';
+  tip.textContent = u.type === 'pen'
+    ? `${penDef(u.id).name} · ${penDef(u.id).tip}mm · ink ${Math.round(penSimFor(u.id).ink * 100)}%`
+    : PAPERS.find(p => p.id === u.id).name;
+});
+scene.onPick((u) => {
+  if (plotLocked()) return;
+  if (u.type === 'pen') selectPen(u.id);
+  else { paperSel = { id: u.id, color: null }; scene.setPaperSelected(u.id); applyPaper(); refreshPanel(); }
+});
 
 // Initial layer assignment: the pen whose ink is nearest the SVG layer color,
 // so a red Inkscape layer picks up the red fineliner automatically.

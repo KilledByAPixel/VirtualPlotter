@@ -104,6 +104,40 @@ export function createScene(mount) {
     return freeCam;
   }
 
+  // Click-picks pens/paper; a drag (orbiting) is not a click. Hover raises
+  // the object slightly and reports it for the tooltip.
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  let pickCb = () => {}, hoverCb = () => {};
+  let downXY = null, hovered = null;
+
+  function castAt(ev) {
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1,
+            -((ev.clientY - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const hit = raycaster.intersectObjects(pickables, false)[0];
+    return hit ? hit.object.userData : null;
+  }
+  renderer.domElement.addEventListener('pointerdown',
+    e => { downXY = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (freeCam || !downXY) return;
+    const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]);
+    downXY = null;
+    if (moved < 6) { const u = castAt(e); if (u) pickCb(u); }
+  });
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (freeCam) return;
+    const u = castAt(e);
+    const key = u && u.type + u.id;
+    if (key !== hovered) {
+      hovered = key;
+      renderer.domElement.style.cursor = u ? 'pointer' : '';
+      hoverCb(u, e.clientX, e.clientY);
+    } else if (u) hoverCb(u, e.clientX, e.clientY);
+  });
+
   // --- lights ---
   scene.add(new THREE.HemisphereLight('#ffffff', '#9aa7b0', 0.55));
   const key = new THREE.DirectionalLight('#fff4e6', 1.0);
@@ -245,6 +279,74 @@ export function createScene(mount) {
   carriage.add(penGroup);
   machine.add(carriage);
 
+  // --- pen caddy + paper stack (the diegetic settings) ---
+  const pickables = [];            // meshes with .userData = {type, id}
+  const penGroups = {};            // id -> {group, barrel, inkBar, homeY}
+  const paperSheets = {};          // id -> mesh
+  let selectedPaperId = null;
+
+  function buildInventory(pens, papers) {
+    const caddy = new THREE.Group();
+    caddy.position.set(PAPER_W / 2 + 115, 0, 30);
+    scene.add(caddy);
+    const tray = new THREE.Mesh(new THREE.BoxGeometry(100, 14, 90), matMatte('#5d4a38'));
+    tray.position.y = 7;
+    tray.castShadow = tray.receiveShadow = true;
+    caddy.add(tray);
+
+    pens.forEach((pen, i) => {
+      const col = i % 5, row = (i / 5) | 0;
+      const g = new THREE.Group();
+      g.position.set(-40 + col * 20, 14, -20 + row * 40);
+      const r = pen.style === 'sharpie' ? 4.5 : pen.style === 'brush' ? 3.2 : 2.4;
+      const barrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r * 0.8, 38, 14),
+        pen.sheen ? matMetal(pen.color) : matGloss(pen.color));
+      barrel.position.y = 19;
+      barrel.castShadow = true;
+      barrel.userData = { type: 'pen', id: pen.id };
+      // ink gauge: a pale ring that shrinks as the pen empties
+      const inkBar = new THREE.Mesh(
+        new THREE.CylinderGeometry(r + 0.4, r + 0.4, 10, 14),
+        matGloss('#e8e4da'));
+      inkBar.position.y = 10;
+      g.add(barrel); g.add(inkBar);
+      caddy.add(g);
+      pickables.push(barrel);
+      penGroups[pen.id] = { group: g, barrel, inkBar, homeY: g.position.y };
+    });
+
+    const stack = new THREE.Group();
+    stack.position.set(-PAPER_W / 2 - 130, 0, 40);
+    scene.add(stack);
+    papers.forEach((p, i) => {
+      const sheet = new THREE.Mesh(new THREE.BoxGeometry(150, 2, 110),
+        matMatte(p.color));
+      sheet.rotation.y = (i - papers.length / 2) * 0.06;
+      sheet.position.y = 1 + i * 2.4;
+      sheet.castShadow = sheet.receiveShadow = true;
+      sheet.userData = { type: 'paper', id: p.id };
+      stack.add(sheet);
+      pickables.push(sheet);
+      paperSheets[p.id] = sheet;
+    });
+  }
+
+  function setPenLevel(id, frac) {
+    const e = penGroups[id]; if (!e) return;
+    e.inkBar.scale.y = Math.max(0.04, frac);
+    e.inkBar.position.y = 5 + 5 * Math.max(0.04, frac);
+  }
+  function setPenInCaddy(id, visible) {
+    const e = penGroups[id]; if (e) e.group.visible = visible;
+  }
+  function setPaperSelected(id) {
+    if (selectedPaperId && paperSheets[selectedPaperId])
+      paperSheets[selectedPaperId].position.y -= 6;
+    selectedPaperId = id;
+    if (paperSheets[id]) paperSheets[id].position.y += 6;
+  }
+
   // --- artwork-mm -> world / canvas mapping ---
   let fit = { scale: 1, originX: PAPER_W / 2, originY: PAPER_H / 2 };
   function loadArtwork(artW, artH) {
@@ -348,5 +450,7 @@ export function createScene(mount) {
     setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
+    buildInventory, onPick: f => pickCb = f, onHover: f => hoverCb = f,
+    setPenLevel, setPenInCaddy, setPaperSelected,
   };
 }
