@@ -305,6 +305,7 @@ export function createScene(mount) {
   function swapPen(def, color, done) {
     swap = { t: 0, half: false, def, color, done };
   }
+  function cancelSwap() { swap = null; }   // drop an in-flight swap; done() never fires
 
   // --- pen caddy + paper stack (the diegetic settings) ---
   const pickables = [];            // meshes with .userData = {type, id}
@@ -489,6 +490,6 @@ export function createScene(mount) {
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
     buildInventory, onPick: f => pickCb = f, onHover: f => hoverCb = f,
-    setPenLevel, setPenInCaddy, setPaperSelected, setCarriagePen, swapPen,
+    setPenLevel, setPenInCaddy, setPaperSelected, setCarriagePen, swapPen, cancelSwap,
   };
 }

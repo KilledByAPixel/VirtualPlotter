@@ -240,6 +240,8 @@ function loadSvgText(text, name) {
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
   layerPens = data.layerInfo.map(l => closestPen(l.color));
   data.layerInfo.forEach((l, i) => { l.color = penColor(layerPens[i]); });
+  scene.cancelSwap();
+  if (activePenId) { syncPen(activePenId); scene.setPenInCaddy(activePenId, true); }
   activePenId = null;
   loaded = true;
   hint.style.display = 'none';
@@ -346,6 +348,7 @@ playBtn.addEventListener('click', () => {
   }
 });
 resetBtn.addEventListener('click', () => {
+  scene.cancelSwap();
   sim.reset();
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
@@ -421,6 +424,7 @@ speedSel.addEventListener('change', () => {
 });
 
 layerSel.addEventListener('change', () => {
+  scene.cancelSwap();
   sim.setLayerFilter(layerSel.value === 'all' ? null : +layerSel.value);
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
