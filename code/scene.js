@@ -91,13 +91,13 @@ export function createScene(mount) {
       fly.addEventListener('unlock', () => setFreeCam(false));
       fly.lock();                            // grab the pointer (F keypress is the gesture)
     } else if (fly) {
+      fly.unlock();     // release the pointer lock so the cursor comes back
       fly.dispose();
       fly = null;
-      // Resume orbiting around a point in front of wherever we flew to, so the
-      // view doesn't snap when OrbitControls takes back over.
-      const dir = new THREE.Vector3();
-      camera.getWorldDirection(dir);
-      controls.target.copy(camera.position).addScaledVector(dir, 200);
+      // Hand the camera back to orbit around the home pivot (the scene
+      // center) — exiting free-cam always restores a sane orbit, from
+      // wherever the flight ended.
+      controls.target.set(0, 0, 0);
       controls.enabled = true;
       controls.update();
     }
