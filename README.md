@@ -16,14 +16,15 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 - **Reset** — clear the ink and send the pen home
 - **Speed** — 1× (real time) up to 1000× for the impatient
 - **Plot** — draw all layers, or just one
-- **Pens** — click a layer, then click a pen in the caddy to assign it. Pens
-  are real: each has its own tip width and line character, and its ink runs
-  down as you plot (and stays down — levels persist). Click a pen and hit
-  **Fresh** in the panel to replace a dead one; the color picker there
-  overrides its ink color.
-- **Paper** — click a sheet in the stack beside the machine: bristol,
-  watercolor, cheap copy, or black card (that's what the white gel and
-  metallic pens are for). Override its color in the panel.
+- **Pens** — pick a pen in the panel or by clicking one in the caddy. Every
+  pen's ink color and tip size are editable; each has its own line character
+  (the marker blobs, the ballpoint dry-starts, the brush swells) and its ink
+  runs down as you plot — levels persist between visits. **Fresh** replaces a
+  dead pen, or tick **Unlimited ink** to never worry about it.
+- **Paper** — choose a paper type in the panel or click the stack beside the
+  machine: bristol, watercolor (toothy), cheap copy (bleeds a little), or
+  black card (that's what the gel and metallic pens are for). The color
+  picker overrides the sheet color.
 - **Layer colors** — pick a pen color per layer before you start (Inkscape layers
   are detected automatically)
 - **🔊** — mute the motor and servo sounds (they only play at 1× speed anyway)
