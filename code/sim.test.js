@@ -97,3 +97,18 @@ test('empty stroke set completes immediately', () => {
   sim.load([], [], [], { downSpeed: 100, upSpeed: 200, liftMs: 0 });
   assert.equal(sim.isComplete(), true);
 });
+
+test('a pen-down pose precedes the first ink of every stroke', () => {
+  const sim = new PlotSim();
+  const events = [];
+  sim.onPose = (x, y, down) => events.push({ type: 'pose', down });
+  sim.onInk = () => events.push({ type: 'ink' });
+  sim.load([[[0, 0], [10, 0]], [[20, 0], [30, 0]]], [0, 0], [{ name: 'a', color: '#000000' }]);
+  sim.start();
+  sim.tick(1e7);
+  let down = false;
+  for (const e of events) {
+    if (e.type === 'pose') down = e.down;
+    else assert.ok(down, 'ink emitted before any pen-down pose for this stroke');
+  }
+});

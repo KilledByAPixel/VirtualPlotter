@@ -139,7 +139,11 @@ export class PlotSim {
     this._liftRemain = this.liftMs / 2;
   }
 
-  _beginDraw() { this._mode = 'draw'; this._segIdx = 0; }
+  _beginDraw() {
+    this._mode = 'draw';
+    this._segIdx = 0;
+    this.onPose(this._penPos[0], this._penPos[1], true);
+  }
 
   // Reached a travel target with the pen up. Either drop to draw the next
   // stroke, or — if this was the final return-home move — finish.

@@ -116,6 +116,7 @@ const penDef = (id) => PENS.find(p => p.id === id) || PENS[0];
 
 let penState = {};
 try { penState = JSON.parse(localStorage.getItem(PEN_KEY)) || {}; } catch {}
+if (typeof penState !== 'object' || !penState || Array.isArray(penState)) penState = {};
 for (const p of PENS) penState[p.id] = { ink: 1, ...penState[p.id] };
 function persistPens() {
   try { localStorage.setItem(PEN_KEY, JSON.stringify(penState)); } catch {}
@@ -182,10 +183,12 @@ function closestPen(hex) {
 let layerPens = [];          // pen id per layer index
 let activePenId = null;      // pen currently in the machine
 let pendingSwap = null;      // {def, col} set by onLayer, consumed by the rAF loop
-const plotLocked = () => sim.running;
+let plotActive = false;      // true from Plot start until reset/complete/new-load/filter-change
+let swapping = false;        // true while a physical pen-swap animation is in flight
+const plotLocked = () => plotActive || swapping;
 
 function assignPen(layerIdx, penId) {
-  if (plotLocked()) return;
+  if (plotLocked() || !sim.layerInfo?.[layerIdx]) return;
   layerPens[layerIdx] = penId;
   sim.layerInfo[layerIdx].color = penColor(penId);  // sim's color follows the pen
   buildLayerUI._refresh?.();
@@ -224,6 +227,7 @@ sim.onInk = (ax, ay, bx, by) => {
     scene.drawOp({ ...op, color: penColor(id), sheen: def.sheen });
 };
 sim.onComplete = () => {
+  plotActive = false;
   playBtn.textContent = '▶ Plot';
   setSwatchesEnabled(true);
   if (activePenId) syncPen(activePenId);
@@ -241,6 +245,8 @@ function loadSvgText(text, name) {
   layerPens = data.layerInfo.map(l => closestPen(l.color));
   data.layerInfo.forEach((l, i) => { l.color = penColor(layerPens[i]); });
   scene.cancelSwap();
+  swapping = false;
+  plotActive = false;
   if (activePenId) { syncPen(activePenId); scene.setPenInCaddy(activePenId, true); }
   activePenId = null;
   loaded = true;
@@ -333,7 +339,7 @@ addEventListener('drop', e => {
 });
 
 playBtn.addEventListener('click', () => {
-  if (!loaded) return;
+  if (!loaded || swapping) return;
   if (sim.running) {
     sim.pause();
     playBtn.textContent = '▶ Plot';
@@ -341,6 +347,7 @@ playBtn.addEventListener('click', () => {
   }
   else {
     if (sim.isComplete()) { sim.reset(); scene.resetInk(); }
+    plotActive = true;
     sim.start();
     audio.resume();              // user gesture — unlock Web Audio
     playBtn.textContent = '❚❚ Pause';
@@ -349,6 +356,8 @@ playBtn.addEventListener('click', () => {
 });
 resetBtn.addEventListener('click', () => {
   scene.cancelSwap();
+  swapping = false;
+  plotActive = false;
   sim.reset();
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
@@ -425,6 +434,8 @@ speedSel.addEventListener('change', () => {
 
 layerSel.addEventListener('change', () => {
   scene.cancelSwap();
+  swapping = false;
+  plotActive = false;
   sim.setLayerFilter(layerSel.value === 'all' ? null : +layerSel.value);
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
@@ -482,7 +493,8 @@ function loop(now) {
     sim.tick(dt * speed);
     if (pendingSwap) {
       const { def, col } = pendingSwap; pendingSwap = null;
-      scene.swapPen(def, col, () => sim.start());
+      swapping = true;
+      scene.swapPen(def, col, () => { swapping = false; sim.start(); });
     }
     if (speed === 1) {
       // Net per-axis movement this frame -> mm/s drives the motor whine.
