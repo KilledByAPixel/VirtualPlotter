@@ -57,16 +57,6 @@ body.ui-hidden #panel { display: none; }
       <label>Plot
         <select id=layerSel><option value=all>All layers</option></select>
       </label>
-      <label>Pen
-        <select id=penSel>
-          <option value=0.3>0.3 mm</option>
-          <option value=0.5>0.5 mm</option>
-          <option value=0.6 selected>0.6 mm</option>
-          <option value=0.7>0.7 mm</option>
-          <option value=1>1.0 mm</option>
-          <option value=2>2.0 mm</option>
-        </select>
-      </label>
     </div>
     <div id=layers></div>
   </div>
@@ -79,6 +69,8 @@ import { extractStrokes } from './code/plotExtract.js';
 import { PlotSim } from './code/sim.js';
 import { createAudio } from './code/audio.js';
 import { SAMPLE_SVG } from './code/sample.js';
+import { PENS, PAPERS, DEFAULT_PEN, DEFAULT_PAPER } from './code/inventory.js';
+import { PenSim, createRng } from './code/penSim.js';
 
 const scene = createScene(document.getElementById('stage'));
 const sim = new PlotSim();
@@ -96,14 +88,99 @@ let loaded = false;
 let penX = 0, penY = 0, penDownPrev = false;
 audio.setEnabled(speed === 1);   // sound only plays at realtime (1x)
 
+// --- pens & paper ---------------------------------------------------------
+// Pen ink levels (and ink-color overrides) persist across sessions: your
+// half-dead Sharpie is still half-dead tomorrow. PenSim instances are the
+// live source of truth; penState mirrors them for storage.
+const PEN_KEY = 'plotter3d.pens';
+const PAPER_KEY = 'plotter3d.paper';
+const penDef = (id) => PENS.find(p => p.id === id) || PENS[0];
+
+let penState = {};
+try { penState = JSON.parse(localStorage.getItem(PEN_KEY)) || {}; } catch {}
+for (const p of PENS) penState[p.id] = { ink: 1, ...penState[p.id] };
+function persistPens() {
+  try { localStorage.setItem(PEN_KEY, JSON.stringify(penState)); } catch {}
+}
+const penColor = (id) => penState[id].color || penDef(id).color;
+
+const penSims = {};
+function penSimFor(id) {
+  if (!penSims[id]) penSims[id] = new PenSim(penDef(id),
+    { ink: penState[id].ink, rng: createRng(1234) });
+  return penSims[id];
+}
+function syncPen(id) {
+  if (!penSims[id]) return;
+  penState[id].ink = penSims[id].ink;
+  persistPens();
+}
+
+let paperSel = { id: DEFAULT_PAPER, color: null };
+try { paperSel = { ...paperSel, ...(JSON.parse(localStorage.getItem(PAPER_KEY)) || {}) }; } catch {}
+const paperDef = () => PAPERS.find(p => p.id === paperSel.id) || PAPERS[0];
+function applyPaper() {
+  const d = paperDef();
+  scene.setPaper({ color: paperSel.color || d.color, grain: d.grain, bleed: d.bleed });
+  try { localStorage.setItem(PAPER_KEY, JSON.stringify(paperSel)); } catch {}
+}
+applyPaper();
+
+// Initial layer assignment: the pen whose ink is nearest the SVG layer color,
+// so a red Inkscape layer picks up the red fineliner automatically.
+function closestPen(hex) {
+  const v = parseInt((hex || '#000000').slice(1), 16);
+  const r = v >> 16 & 255, g = v >> 8 & 255, b = v & 255;
+  let best = DEFAULT_PEN, bd = Infinity;
+  for (const p of PENS) {
+    const w = parseInt(penColor(p.id).slice(1), 16);
+    const d = (r - (w >> 16 & 255)) ** 2 + (g - (w >> 8 & 255)) ** 2 + (b - (w & 255)) ** 2;
+    if (d < bd) { bd = d; best = p.id; }
+  }
+  return best;
+}
+
+let layerPens = [];          // pen id per layer index
+let activePenId = null;      // pen currently in the machine
+const plotLocked = () => sim.running;
+
+function assignPen(layerIdx, penId) {
+  if (plotLocked()) return;
+  layerPens[layerIdx] = penId;
+  sim.layerInfo[layerIdx].color = penColor(penId);  // sim's color follows the pen
+  buildLayerUI._refresh?.();
+}
+
 sim.onPose = (x, y, down) => {
   scene.setPenPose(x, y, down);
   penX = x; penY = y;
-  if (down !== penDownPrev) { penDownPrev = down; audio.penMove(down); }
+  if (down !== penDownPrev) {
+    penDownPrev = down;
+    const ps = activePenId && penSimFor(activePenId);
+    if (ps) down ? ps.penDown() : ps.penUp();
+    audio.penMove(down);
+  }
 };
-sim.onInk = (ax, ay, bx, by, c) => scene.inkSegment(ax, ay, bx, by, c);
+sim.onLayer = (i) => {
+  const id = layerPens[i] ?? DEFAULT_PEN;
+  if (id !== activePenId) {
+    if (activePenId) syncPen(activePenId);
+    activePenId = id;
+    scene.setPenColor(penColor(id));   // replaced by real pen swap in Task 8
+  }
+};
+sim.onInk = (ax, ay, bx, by) => {
+  const id = activePenId ?? DEFAULT_PEN;
+  const def = penDef(id);
+  for (const op of penSimFor(id).segment(ax, ay, bx, by))
+    scene.drawOp({ ...op, color: penColor(id), sheen: def.sheen });
+};
 sim.onPenColor = (c) => scene.setPenColor(c);
-sim.onComplete = () => { playBtn.textContent = '▶ Plot'; setSwatchesEnabled(true); };
+sim.onComplete = () => {
+  playBtn.textContent = '▶ Plot';
+  setSwatchesEnabled(true);
+  if (activePenId) syncPen(activePenId);
+};
 
 function loadSvgText(text, name) {
   let data;
@@ -113,6 +190,9 @@ function loadSvgText(text, name) {
   scene.loadArtwork(data.widthMm, data.heightMm);
   sim.load(data.strokes, data.strokeLayers, data.layerInfo,
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
+  layerPens = data.layerInfo.map(l => closestPen(l.color));
+  data.layerInfo.forEach((l, i) => { l.color = penColor(layerPens[i]); });
+  activePenId = null;
   loaded = true;
   hint.style.display = 'none';
   controls.style.display = '';
@@ -204,7 +284,11 @@ addEventListener('drop', e => {
 
 playBtn.addEventListener('click', () => {
   if (!loaded) return;
-  if (sim.running) { sim.pause(); playBtn.textContent = '▶ Plot'; }
+  if (sim.running) {
+    sim.pause();
+    playBtn.textContent = '▶ Plot';
+    if (activePenId) syncPen(activePenId);
+  }
   else {
     if (sim.isComplete()) { sim.reset(); scene.resetInk(); }
     sim.start();
@@ -239,31 +323,17 @@ muteBtn.addEventListener('click', () => {
 const speedSel = document.getElementById('speedSel');
 const layerSel = document.getElementById('layerSel');
 const layersDiv = document.getElementById('layers');
-const penSel = document.getElementById('penSel');
 
 // Pen-color swatches are disabled while a plot is in progress (you set the
 // colors up front, like loading pens before a real plot). Re-enabled on
 // reset and when the plot finishes.
 function setSwatchesEnabled(on) {
   layersDiv.querySelectorAll('input[type=color]').forEach(el => { el.disabled = !on; });
-  penSel.disabled = !on;   // thickness is a pen property too — locked mid-plot
 }
 
 speedSel.addEventListener('change', () => {
   speed = +speedSel.value;
   audio.setEnabled(speed === 1);   // mute above realtime
-});
-
-// Pen thickness (persisted like the mute setting). Applies to ink drawn from
-// now on; strokes already on the paper are rasterized and keep their width.
-try {
-  const w = localStorage.getItem('plotter3d.penWidth');
-  if (w && [...penSel.options].some(o => o.value === w)) penSel.value = w;
-} catch {}
-scene.setPenWidth(+penSel.value);
-penSel.addEventListener('change', () => {
-  scene.setPenWidth(+penSel.value);
-  try { localStorage.setItem('plotter3d.penWidth', penSel.value); } catch {}
 });
 
 layerSel.addEventListener('change', () => {

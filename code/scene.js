@@ -272,7 +272,6 @@ export function createScene(mount) {
     penDownTarget = !!penDown;
   }
 
-  let penWidthMm = 0.6;
   // Paper-aware stroke renderer. grain roughens alpha per op (visual only, so
   // Math.random is fine here); bleed adds a faint wide halo pass; sheen adds a
   // bright core fleck so metallic ink glints.
@@ -307,13 +306,7 @@ export function createScene(mount) {
     tex.needsUpdate = true;
   }
 
-  // Legacy shim (callers move to drawOp in the next task).
-  function inkSegment(ax, ay, bx, by, color) {
-    drawOp({ ax, ay, bx, by, color, widthMm: penWidthMm });
-  }
-
   function setPenColor(c) { penBody.material.color.set(c); }
-  function setPenWidth(mm) { penWidthMm = mm; }
   function resetInk() { clearInk(); tex.needsUpdate = true; }
 
   function setPaper(p) {
@@ -351,7 +344,7 @@ export function createScene(mount) {
   });
 
   return {
-    loadArtwork, setPenPose, drawOp, setPaper, inkSegment, setPenColor, setPenWidth, resetInk, render,
+    loadArtwork, setPenPose, drawOp, setPaper, setPenColor, resetInk, render,
     setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
