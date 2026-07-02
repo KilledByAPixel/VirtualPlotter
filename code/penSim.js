@@ -42,6 +42,28 @@ export class PenSim {
     this.drawnMm += len;
     const spend = (len / 1000 / pen.capacityM) * (pen.tip / REF_TIP);
     this.ink = Math.max(0, this.ink - spend);
-    return [{ ax, ay, bx, by, widthMm: pen.tip, alpha: 1 }];
+
+    // Dry start: cheap pens need a few mm to get flowing after pen-down.
+    if (pen.dryStartMm && startMm < pen.dryStartMm) return [];
+
+    // Random skips: base chance for cheap pens, rising sharply on low ink.
+    let skip = pen.skipChance || 0;
+    if (this.ink < LOW_INK) skip += 0.5 * (1 - this.ink / LOW_INK);
+    if (skip > 0 && this.rng() < skip) return [];
+
+    let width = pen.tip;
+    if (pen.style === 'brush') {
+      // Organic swell: two incommensurate sines over drawn distance.
+      const t = this.drawnMm;
+      const s = 0.5 + 0.5 * Math.sin(t * 0.09) * Math.sin(t * 0.023 + 2);
+      width = pen.tipMin + (pen.tipMax - pen.tipMin) * s;
+    } else if (pen.style === 'sharpie' && startMm < 1) {
+      width = pen.tip * 1.4;   // touch-down blob
+    }
+
+    let alpha = 1;
+    if (this.ink < LOW_INK) alpha *= Math.max(0.15, this.ink / LOW_INK);
+
+    return [{ ax, ay, bx, by, widthMm: width, alpha }];
   }
 }
