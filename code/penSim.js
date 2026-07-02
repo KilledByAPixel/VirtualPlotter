@@ -20,10 +20,11 @@ const LOW_INK = 0.15;      // below this fraction the line fades and skips
 const REF_TIP = 0.5;       // capacityM is rated at this tip width
 
 export class PenSim {
-  constructor(pen, { ink = 1, rng = createRng(1) } = {}) {
+  constructor(pen, { ink = 1, rng = createRng(1), unlimited = false } = {}) {
     this.pen = pen;
     this.ink = ink;
     this.rng = rng;
+    this.unlimited = unlimited;
     this.strokeMm = 0;     // mm drawn since the last pen-down
     this.drawnMm = 0;      // lifetime mm (drives brush width phase)
   }
@@ -40,8 +41,11 @@ export class PenSim {
     const startMm = this.strokeMm;
     this.strokeMm += len;
     this.drawnMm += len;
-    const spend = (len / 1000 / pen.capacityM) * (pen.tip / REF_TIP);
-    this.ink = Math.max(0, this.ink - spend);
+
+    if (!this.unlimited) {
+      const spend = (len / 1000 / pen.capacityM) * (pen.tip / REF_TIP);
+      this.ink = Math.max(0, this.ink - spend);
+    }
 
     // Dry start: cheap pens need a few mm to get flowing after pen-down.
     if (pen.dryStartMm && startMm < pen.dryStartMm) return [];
@@ -57,7 +61,7 @@ export class PenSim {
       const t = this.drawnMm;
       const s = 0.5 + 0.5 * Math.sin(t * 0.09) * Math.sin(t * 0.023 + 2);
       width = pen.tipMin + (pen.tipMax - pen.tipMin) * s;
-    } else if (pen.style === 'sharpie' && startMm < 1) {
+    } else if (pen.style === 'marker' && startMm < 1) {
       width = pen.tip * 1.4;   // touch-down blob
     }
 

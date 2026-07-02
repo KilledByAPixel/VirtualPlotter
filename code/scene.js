@@ -296,7 +296,7 @@ export function createScene(mount) {
   // the lift (the caddy pen blinks out, the old one returns), and drops back.
   let swap = null;   // {t, half, def, color, done}
   function applyCarriagePen(def, color) {
-    const r = def.style === 'sharpie' ? 4.5 / 2.2 : def.style === 'brush' ? 3.2 / 2.2 : 1;
+    const r = def.style === 'marker' ? 4.5 / 2.2 : def.style === 'brush' ? 3.2 / 2.2 : 1;
     penBody.scale.set(r, 1, r);
     penBody.material = def.sheen ? matMetal(color) : matGloss(color);
     penTip.material = penBody.material;
@@ -326,7 +326,7 @@ export function createScene(mount) {
       const col = i % 5, row = (i / 5) | 0;
       const g = new THREE.Group();
       g.position.set(-40 + col * 20, 14, -20 + row * 40);
-      const r = pen.style === 'sharpie' ? 4.5 : pen.style === 'brush' ? 3.2 : 2.4;
+      const r = pen.style === 'marker' ? 4.5 : pen.style === 'brush' ? 3.2 : 2.4;
       const barrel = new THREE.Mesh(
         new THREE.CylinderGeometry(r, r * 0.8, 38, 14),
         pen.sheen ? matMetal(pen.color) : matGloss(pen.color));

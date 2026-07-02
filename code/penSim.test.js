@@ -102,3 +102,14 @@ test('brush width varies smoothly within [tipMin, tipMax]', () => {
   for (let i = 1; i < widths.length; i++)
     assert.ok(Math.abs(widths[i] - widths[i - 1]) < 0.6, 'no sudden jumps');
 });
+
+test('unlimited ink never depletes and can be toggled', () => {
+  const ps = new PenSim(pen('fine05'), { unlimited: true });
+  ps.penDown();
+  ps.segment(0, 0, 100000, 0);            // 100 m of line
+  assert.equal(ps.ink, 1);
+  assert.equal(ps.segment(0, 0, 10, 0).length, 1);  // still draws normally
+  ps.unlimited = false;
+  ps.segment(0, 0, 1000, 0);
+  assert.ok(ps.ink < 1, 'depletion resumes when toggled off');
+});

@@ -27,3 +27,9 @@ test('paper definitions are unique and complete', () => {
   }
   assert.ok(PAPERS.some(p => p.id === DEFAULT_PAPER), 'DEFAULT_PAPER exists');
 });
+
+test('pen names are generic: no trademarks or color words', () => {
+  for (const p of PENS)
+    assert.ok(!/sharpie|red|blue|white|silver|gold/i.test(p.name),
+      `${p.id} name "${p.name}" not generic`);
+});
