@@ -130,8 +130,10 @@ export function createScene(mount) {
   canvas.width = Math.round(PAPER_W * PXMM);
   canvas.height = Math.round(PAPER_H * PXMM);
   const ctx = canvas.getContext('2d');
+  let paperState = { color: '#ffffff', grain: 0, bleed: 0 };
   const clearInk = () => {
-    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = paperState.color;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   };
   clearInk();
@@ -271,21 +273,55 @@ export function createScene(mount) {
   }
 
   let penWidthMm = 0.6;
-  function inkSegment(ax, ay, bx, by, color) {
-    ctx.strokeStyle = color || '#000';
-    ctx.lineWidth = Math.max(1, penWidthMm * PXMM);
+  // Paper-aware stroke renderer. grain roughens alpha per op (visual only, so
+  // Math.random is fine here); bleed adds a faint wide halo pass; sheen adds a
+  // bright core fleck so metallic ink glints.
+  function drawOp(op) {
+    const { ax, ay, bx, by, color, widthMm, alpha = 1, sheen } = op;
+    let a = alpha;
+    if (paperState.grain) a *= 1 - paperState.grain * 0.7 * Math.random();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(cX(ax), cY(ay));
-    ctx.lineTo(cX(bx), cY(by));
-    ctx.stroke();
+    ctx.strokeStyle = color || '#000';
+    const seg = () => {
+      ctx.beginPath();
+      ctx.moveTo(cX(ax), cY(ay));
+      ctx.lineTo(cX(bx), cY(by));
+      ctx.stroke();
+    };
+    if (paperState.bleed) {
+      ctx.globalAlpha = a * 0.25;
+      ctx.lineWidth = Math.max(1, (widthMm + paperState.bleed) * PXMM);
+      seg();
+    }
+    ctx.globalAlpha = a;
+    ctx.lineWidth = Math.max(1, widthMm * PXMM);
+    seg();
+    if (sheen) {
+      ctx.globalAlpha = a * 0.3 * Math.random();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = Math.max(1, widthMm * 0.35 * PXMM);
+      seg();
+    }
+    ctx.globalAlpha = 1;
     tex.needsUpdate = true;
+  }
+
+  // Legacy shim (callers move to drawOp in the next task).
+  function inkSegment(ax, ay, bx, by, color) {
+    drawOp({ ax, ay, bx, by, color, widthMm: penWidthMm });
   }
 
   function setPenColor(c) { penBody.material.color.set(c); }
   function setPenWidth(mm) { penWidthMm = mm; }
   function resetInk() { clearInk(); tex.needsUpdate = true; }
+
+  function setPaper(p) {
+    paperState = { color: p.color || '#ffffff', grain: p.grain || 0, bleed: p.bleed || 0 };
+    slab.material.color.set(paperState.color);  // paper edges match the sheet
+    clearInk();
+    tex.needsUpdate = true;
+  }
 
   function render(dtMs = 16) {
     const target = penDownTarget ? PEN_DOWN : PEN_UP;
@@ -315,7 +351,7 @@ export function createScene(mount) {
   });
 
   return {
-    loadArtwork, setPenPose, inkSegment, setPenColor, setPenWidth, resetInk, render,
+    loadArtwork, setPenPose, drawOp, setPaper, inkSegment, setPenColor, setPenWidth, resetInk, render,
     setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
