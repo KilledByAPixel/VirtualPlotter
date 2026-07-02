@@ -181,6 +181,7 @@ function closestPen(hex) {
 
 let layerPens = [];          // pen id per layer index
 let activePenId = null;      // pen currently in the machine
+let pendingSwap = null;      // {def, col} set by onLayer, consumed by the rAF loop
 const plotLocked = () => sim.running;
 
 function assignPen(layerIdx, penId) {
@@ -202,10 +203,18 @@ sim.onPose = (x, y, down) => {
 };
 sim.onLayer = (i) => {
   const id = layerPens[i] ?? DEFAULT_PEN;
-  if (id !== activePenId) {
-    if (activePenId) syncPen(activePenId);
-    activePenId = id;
-    scene.setPenColor(penColor(id));   // replaced by real pen swap in Task 8
+  if (id === activePenId) return;
+  const prev = activePenId;
+  if (prev) { syncPen(prev); scene.setPenInCaddy(prev, true); }
+  activePenId = id;
+  scene.setPenInCaddy(id, false);              // it's in the machine now
+  const def = penDef(id), col = penColor(id);
+  if (speed === 1 && sim.running && prev) {
+    pendingSwap = { def, col };
+    sim.pause();
+    audio.penMove(false);                      // servo blip sells the swap
+  } else {
+    scene.setCarriagePen(def, col);
   }
 };
 sim.onInk = (ax, ay, bx, by) => {
@@ -214,11 +223,11 @@ sim.onInk = (ax, ay, bx, by) => {
   for (const op of penSimFor(id).segment(ax, ay, bx, by))
     scene.drawOp({ ...op, color: penColor(id), sheen: def.sheen });
 };
-sim.onPenColor = (c) => scene.setPenColor(c);
 sim.onComplete = () => {
   playBtn.textContent = '▶ Plot';
   setSwatchesEnabled(true);
   if (activePenId) syncPen(activePenId);
+  if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
 };
 
 function loadSvgText(text, name) {
@@ -341,6 +350,7 @@ resetBtn.addEventListener('click', () => {
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
   setSwatchesEnabled(true);
+  if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
 });
 
 // Sound on/off toggle (persisted). This is independent of the realtime gate,
@@ -466,6 +476,10 @@ function loop(now) {
   if (sim.running) {
     const px = penX, py = penY;
     sim.tick(dt * speed);
+    if (pendingSwap) {
+      const { def, col } = pendingSwap; pendingSwap = null;
+      scene.swapPen(def, col, () => sim.start());
+    }
     if (speed === 1) {
       // Net per-axis movement this frame -> mm/s drives the motor whine.
       const dtSec = Math.max(dt, 1) / 1000;

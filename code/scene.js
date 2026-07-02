@@ -291,6 +291,21 @@ export function createScene(mount) {
   carriage.add(penGroup);
   machine.add(carriage);
 
+  // The pen in the carriage mirrors the assigned pen: barrel color, girth,
+  // metallic finish. swapPen raises the head, changes the pen at the top of
+  // the lift (the caddy pen blinks out, the old one returns), and drops back.
+  let swap = null;   // {t, half, def, color, done}
+  function applyCarriagePen(def, color) {
+    const r = def.style === 'sharpie' ? 4.5 / 2.2 : def.style === 'brush' ? 3.2 / 2.2 : 1;
+    penBody.scale.set(r, 1, r);
+    penBody.material = def.sheen ? matMetal(color) : matGloss(color);
+    penTip.material = penBody.material;
+  }
+  function setCarriagePen(def, color) { applyCarriagePen(def, color); }
+  function swapPen(def, color, done) {
+    swap = { t: 0, half: false, def, color, done };
+  }
+
   // --- pen caddy + paper stack (the diegetic settings) ---
   const pickables = [];            // meshes with .userData = {type, id}
   const penGroups = {};            // id -> {group, barrel, inkBar, homeY}
@@ -420,7 +435,6 @@ export function createScene(mount) {
     tex.needsUpdate = true;
   }
 
-  function setPenColor(c) { penBody.material.color.set(c); }
   function resetInk() { clearInk(); tex.needsUpdate = true; }
 
   function setPaper(p) {
@@ -431,9 +445,21 @@ export function createScene(mount) {
   }
 
   function render(dtMs = 16) {
-    const target = penDownTarget ? PEN_DOWN : PEN_UP;
-    penY += (target - penY) * 0.25;          // smooth lift/drop
-    penGroup.position.y = penY + PAPER_TOP_Y; // tip rests just above paper
+    if (swap) {
+      swap.t += dtMs / 600;                       // 0..1 over 0.6s
+      const up = Math.sin(Math.min(swap.t, 1) * Math.PI) * 50;
+      penGroup.position.y = PEN_UP + PAPER_TOP_Y + up;
+      if (swap.t >= 0.5 && !swap.half) {
+        swap.half = true;
+        applyCarriagePen(swap.def, swap.color);
+      }
+      if (swap.t >= 1) { const d = swap.done; swap = null; d && d(); }
+      // skip normal pen easing while swapping
+    } else {
+      const target = penDownTarget ? PEN_DOWN : PEN_UP;
+      penY += (target - penY) * 0.25;          // smooth lift/drop
+      penGroup.position.y = penY + PAPER_TOP_Y; // tip rests just above paper
+    }
     if (freeCam && fly) {
       // Constant-speed WASD flight in the look direction; strafe/vertical stay
       // level. No easing — the camera moves only while a key is held.
@@ -458,11 +484,11 @@ export function createScene(mount) {
   });
 
   return {
-    loadArtwork, setPenPose, drawOp, setPaper, setPenColor, resetInk, render,
+    loadArtwork, setPenPose, drawOp, setPaper, resetInk, render,
     setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
     buildInventory, onPick: f => pickCb = f, onHover: f => hoverCb = f,
-    setPenLevel, setPenInCaddy, setPaperSelected,
+    setPenLevel, setPenInCaddy, setPaperSelected, setCarriagePen, swapPen,
   };
 }
