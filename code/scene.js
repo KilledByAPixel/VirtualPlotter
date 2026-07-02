@@ -181,7 +181,34 @@ export function createScene(mount) {
     ctx.globalAlpha = 1;
     ctx.fillStyle = paperState.color;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    bakeGrain();
   };
+
+  // Paper tooth: per-pixel luminance jitter scaled by grain, plus a few soft
+  // blotches on heavy-grain papers (watercolor) so it doesn't read as uniform
+  // noise. Baked once per clear; ink draws over it.
+  function bakeGrain() {
+    const g = paperState.grain;
+    if (!g) return;
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const n = (Math.random() - 0.5) * 34 * g;
+      d[i] += n; d[i + 1] += n; d[i + 2] += n;
+    }
+    ctx.putImageData(img, 0, 0);
+    if (g >= 0.3) {
+      for (let i = 0; i < 14; i++) {
+        const x = Math.random() * canvas.width, y = Math.random() * canvas.height;
+        const r = 60 + Math.random() * 200;
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, 'rgba(139,130,114,' + (0.05 * g).toFixed(3) + ')');
+        grad.addColorStop(1, 'rgba(139,130,114,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
+      }
+    }
+  }
   clearInk();
   const tex = new THREE.CanvasTexture(canvas);
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -350,8 +377,8 @@ export function createScene(mount) {
     papers.forEach((p, i) => {
       const sheet = new THREE.Mesh(new THREE.BoxGeometry(150, 2, 110),
         matMatte(p.color));
-      sheet.rotation.y = (i - papers.length / 2) * 0.06;
-      sheet.position.y = 1 + i * 2.4;
+      sheet.rotation.y = (i - papers.length / 2) * 0.16;
+      sheet.position.set((i % 2 ? 10 : -10), 1 + i * 3.2, (i - papers.length / 2) * 14);
       sheet.castShadow = sheet.receiveShadow = true;
       sheet.userData = { type: 'paper', id: p.id };
       stack.add(sheet);
@@ -373,6 +400,15 @@ export function createScene(mount) {
       paperSheets[selectedPaperId].position.y -= 6;
     selectedPaperId = id;
     if (paperSheets[id]) paperSheets[id].position.y += 6;
+  }
+
+  let selectedPenId3d = null;
+  function setPenSelected(id) {
+    const prev = penGroups[selectedPenId3d];
+    if (prev) prev.group.position.y = prev.homeY;
+    selectedPenId3d = id;
+    const cur = penGroups[id];
+    if (cur) cur.group.position.y = cur.homeY + 6;
   }
 
   // --- artwork-mm -> world / canvas mapping ---
@@ -490,6 +526,6 @@ export function createScene(mount) {
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },
     buildInventory, onPick: f => pickCb = f, onHover: f => hoverCb = f,
-    setPenLevel, setPenInCaddy, setPaperSelected, setCarriagePen, swapPen, cancelSwap,
+    setPenLevel, setPenInCaddy, setPaperSelected, setPenSelected, setCarriagePen, swapPen, cancelSwap,
   };
 }
