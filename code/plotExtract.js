@@ -31,6 +31,43 @@ function parseLengthMm(s) {
   return n * (conv[u] ?? 25.4/96);
 }
 
+// Adaptive arc-length sampler. pointAt(l) -> [x, y] in output (mm) space.
+// Walks the curve at baseStep, then recursively subdivides any span whose
+// midpoint strays more than tol from the chord — smooth runs stay sparse while
+// tight bends and hard corners get points exactly where they turn.
+export function adaptiveSample(pointAt, len, { baseStep, tol = 0.05, maxPoints = 20000 } = {}) {
+  if (!(len > 0)) return [];
+  const step = Math.max(1e-6, baseStep || len / 100);
+  const n = Math.max(1, Math.ceil(len / step));
+  const pts = [pointAt(0)];
+  const chordDev = (p0, pm, p1) => {
+    const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+    const l2 = dx * dx + dy * dy;
+    if (l2 < 1e-12) return Math.hypot(pm[0] - p0[0], pm[1] - p0[1]);
+    let t = ((pm[0] - p0[0]) * dx + (pm[1] - p0[1]) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(pm[0] - (p0[0] + t * dx), pm[1] - (p0[1] + t * dy));
+  };
+  const refine = (l0, p0, l1, p1, depth) => {
+    if (depth <= 0 || pts.length >= maxPoints) return;
+    const lm = (l0 + l1) / 2;
+    const pm = pointAt(lm);
+    if (chordDev(p0, pm, p1) <= tol) return;
+    refine(l0, p0, lm, pm, depth - 1);
+    pts.push(pm);
+    refine(lm, pm, l1, p1, depth - 1);
+  };
+  let prevL = 0, prev = pts[0];
+  for (let i = 1; i <= n; i++) {
+    const l = Math.min(len, (i * len) / n);
+    const p = pointAt(l);
+    refine(prevL, prev, l, p, 18);
+    pts.push(p);
+    prevL = l; prev = p;
+  }
+  return pts;
+}
+
 export function extractStrokes(svgText) {
   if (!/<svg\b[^>]*\bxmlns\s*=/i.test(svgText)) {
     svgText = svgText.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
@@ -167,13 +204,17 @@ function extractFromLiveSvg(svg, srcForAttrs) {
   };
 
   const samplePathLike = (el, ctm, len) => {
-    const step = Math.max(0.5, len/2000); const pts = [];
-    for (let l=0;l<=len;l+=step){const p=el.getPointAtLength(l); pts.push(mapPt(ctm,p.x,p.y));}
-    const pe=el.getPointAtLength(len); pts.push(mapPt(ctm,pe.x,pe.y));
-    return pts;
+    const pointAt = (l) => { const p = el.getPointAtLength(l); return mapPt(ctm, p.x, p.y); };
+    return adaptiveSample(pointAt, len, { baseStep: Math.max(0.5, len / 2000) });
   };
 
-  const extractPath = (pathEl, ctm, layerIdx) => {
+  // A fill's outline is implicitly closed even when the path data isn't.
+  const closePts = (pts) => {
+    const a = pts[0], b = pts[pts.length - 1];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.01) pts.push(a.slice());
+  };
+
+  const extractPath = (pathEl, ctm, layerIdx, closeOutline) => {
     const d = pathEl.getAttribute('d') || '';
     const chunks = d.match(/[Mm][^Mm]*/g) || [];
     if (!chunks.length) return;
@@ -194,7 +235,10 @@ function extractFromLiveSvg(svg, srcForAttrs) {
       let len=0; try{len=tmp.getTotalLength();}catch{}
       if (len>0){
         const pts=samplePathLike(tmp,ctm,len);
-        if (pts.length>=2){strokes.push(pts);strokeLayers.push(layerIdx);}
+        if (pts.length>=2){
+          if (closeOutline) closePts(pts);
+          strokes.push(pts);strokeLayers.push(layerIdx);
+        }
         const pe=tmp.getPointAtLength(len); cx=pe.x; cy=pe.y;
       } else {cx=ax;cy=ay;}
       sx=ax;sy=ay; if(/[Zz]/.test(sub)){cx=sx;cy=sy;}
@@ -209,16 +253,26 @@ function extractFromLiveSvg(svg, srcForAttrs) {
     if (typeof el.getScreenCTM !== 'function') continue;
     const cs = window.getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
-    if (cs.stroke === 'none' || cs.stroke === '') continue;
-    if (parseFloat(cs.strokeOpacity) === 0) continue;
     if (parseFloat(cs.opacity) === 0) continue;
-    const ctm = getCTM(el); if (!ctm) continue;
-    const layerIdx = layerIdxFor(el, cssColorToHex(cs.stroke));
     const tag = el.tagName.toLowerCase();
-    if (tag === 'path') extractPath(el, ctm, layerIdx);
+    const stroked = cs.stroke !== 'none' && cs.stroke !== ''
+      && parseFloat(cs.strokeOpacity) !== 0;
+    // Fill-only shapes plot as outlines (a line can't render a fill, so it
+    // stays stroke-only). Computed fill defaults to black, so any painted
+    // shape qualifies.
+    const filled = tag !== 'line' && cs.fill !== 'none' && cs.fill !== ''
+      && parseFloat(cs.fillOpacity) !== 0;
+    if (!stroked && !filled) continue;
+    const ctm = getCTM(el); if (!ctm) continue;
+    const layerIdx = layerIdxFor(el, cssColorToHex(stroked ? cs.stroke : cs.fill));
+    const closeOutline = !stroked;   // tracing a fill: outline is a closed loop
+    if (tag === 'path') extractPath(el, ctm, layerIdx, closeOutline);
     else {
       const pts = extractAnalytic(el, tag, ctm);
-      if (pts && pts.length >= 2) { strokes.push(pts); strokeLayers.push(layerIdx); }
+      if (pts && pts.length >= 2) {
+        if (closeOutline) closePts(pts);
+        strokes.push(pts); strokeLayers.push(layerIdx);
+      }
     }
   }
 
