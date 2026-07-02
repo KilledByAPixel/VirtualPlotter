@@ -15,10 +15,12 @@
 #panel .row { margin-bottom: 8px; display: flex; gap: 10px; align-items: center; }
 #panel label { display: flex; gap: 4px; align-items: center; color: #555; }
 #layers { display: flex; flex-direction: column; gap: 4px; max-width: 220px; }
-.layer-row { display: flex; align-items: center; gap: 6px; }
-.layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
-.layer-row input[type=color]:disabled { opacity: 0.35; cursor: not-allowed; }
+.layer-row { display: flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 4px; padding: 1px 3px; }
+.layer-row.sel { background: #e3ecf7; }
+.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #0002; }
 .layer-name { color: #333; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pen-name { color: #555; font-size: 11px; margin-left: auto; white-space: nowrap; }
+#penInfo input[type=color], #paperColor { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 #recent { margin-top: 10px; display: none; }
 .recent-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
 .recent-item { display: block; width: 100%; max-width: 220px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; margin: 2px 0; font-size: 12px; cursor: pointer; background: #f3f5f7; border: 1px solid #dde2e6; border-radius: 4px; }
@@ -59,6 +61,18 @@ body.ui-hidden #panel { display: none; }
       </label>
     </div>
     <div id=layers></div>
+    <div class=row id=penInfo style="display:none">
+      <span id=penInfoDot class=dot></span>
+      <span id=penInfoName class=layer-name></span>
+      <span id=penInfoInk style="color:#888"></span>
+      <input type=color id=penInkColor title="Override ink color">
+      <button id=penReplace title="Swap in a fresh pen">Fresh</button>
+    </div>
+    <div class=row>
+      <label>Paper <span id=paperName></span>
+        <input type=color id=paperColor title="Override paper color">
+      </label>
+    </div>
   </div>
   <div id=recent></div>
 </div>
@@ -94,6 +108,7 @@ audio.setEnabled(speed === 1);   // sound only plays at realtime (1x)
 // live source of truth; penState mirrors them for storage.
 const PEN_KEY = 'plotter3d.pens';
 const PAPER_KEY = 'plotter3d.paper';
+try { localStorage.removeItem('plotter3d.penWidth'); } catch {}   // leftover key from a removed feature
 const penDef = (id) => PENS.find(p => p.id === id) || PENS[0];
 
 let penState = {};
@@ -324,12 +339,47 @@ const speedSel = document.getElementById('speedSel');
 const layerSel = document.getElementById('layerSel');
 const layersDiv = document.getElementById('layers');
 
-// Pen-color swatches are disabled while a plot is in progress (you set the
-// colors up front, like loading pens before a real plot). Re-enabled on
-// reset and when the plot finishes.
-function setSwatchesEnabled(on) {
-  layersDiv.querySelectorAll('input[type=color]').forEach(el => { el.disabled = !on; });
+let selectedLayer = 0;
+let selectedPenId = null;
+const penInfo = document.getElementById('penInfo');
+const paperColor = document.getElementById('paperColor');
+const paperName = document.getElementById('paperName');
+
+function setSwatchesEnabled(on) {   // name kept: same lock, wider scope
+  document.getElementById('penInkColor').disabled = !on;
+  document.getElementById('penReplace').disabled = !on;
+  paperColor.disabled = !on;
 }
+
+function selectLayer(i) {
+  selectedLayer = i;
+  refreshPanel();
+}
+
+function selectPen(id) {
+  selectedPenId = id;
+  if (selectedLayer != null && !plotLocked()) assignPen(selectedLayer, id);
+  refreshPanel();
+}
+
+function refreshPanel() {
+  layersDiv.querySelectorAll('.layer-row').forEach((row, i) => {
+    row.classList.toggle('sel', i === selectedLayer);
+    row.querySelector('.dot').style.background = penColor(layerPens[i]);
+    row.querySelector('.pen-name').textContent = penDef(layerPens[i]).name;
+  });
+  if (selectedPenId) {
+    penInfo.style.display = '';
+    document.getElementById('penInfoDot').style.background = penColor(selectedPenId);
+    document.getElementById('penInfoName').textContent = penDef(selectedPenId).name;
+    document.getElementById('penInfoInk').textContent =
+      Math.round(penSimFor(selectedPenId).ink * 100) + '%';
+    document.getElementById('penInkColor').value = penColor(selectedPenId);
+  } else penInfo.style.display = 'none';
+  paperName.textContent = paperDef().name;
+  paperColor.value = paperSel.color || paperDef().color;
+}
+buildLayerUI._refresh = refreshPanel;
 
 speedSel.addEventListener('change', () => {
   speed = +speedSel.value;
@@ -354,22 +404,36 @@ function buildLayerUI(data) {
 
     const row = document.createElement('div');
     row.className = 'layer-row';
-    const sw = document.createElement('input');
-    sw.type = 'color';
-    sw.value = l.color;
-    sw.addEventListener('input', () => {
-      l.color = sw.value;                 // future ink + pen use the new color
-      scene.setPenColor(sw.value);
-    });
-    const name = document.createElement('span');
-    name.className = 'layer-name';
-    name.textContent = l.name;
-    row.appendChild(sw);
-    row.appendChild(name);
+    row.innerHTML = `<span class=dot></span><span class=layer-name></span><span class=pen-name></span>`;
+    row.querySelector('.layer-name').textContent = l.name;
+    row.addEventListener('click', () => selectLayer(i));
     layersDiv.appendChild(row);
   });
   layerSel.disabled = data.layerInfo.length < 2;
+  selectedLayer = 0;
+  refreshPanel();
 }
+
+document.getElementById('penInkColor').addEventListener('input', (e) => {
+  if (!selectedPenId) return;
+  penState[selectedPenId].color = e.target.value;
+  persistPens();
+  layerPens.forEach((id, i) => {      // layers holding this pen follow it
+    if (id === selectedPenId) sim.layerInfo[i].color = penColor(id);
+  });
+  refreshPanel();
+});
+document.getElementById('penReplace').addEventListener('click', () => {
+  if (!selectedPenId || plotLocked()) return;
+  penSimFor(selectedPenId).refill();
+  syncPen(selectedPenId);
+  refreshPanel();
+});
+paperColor.addEventListener('input', (e) => {
+  if (plotLocked()) return;
+  paperSel.color = e.target.value;
+  applyPaper();
+});
 
 let last = performance.now();
 function loop(now) {
