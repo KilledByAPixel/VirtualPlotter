@@ -23,10 +23,7 @@
 .recent-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
 .recent-item { display: block; width: 100%; max-width: 220px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; margin: 2px 0; font-size: 12px; cursor: pointer; background: #f3f5f7; border: 1px solid #dde2e6; border-radius: 4px; }
 .recent-item:hover { background: #e7ebef; }
-#camhint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,0.55); color: #fff; padding: 6px 12px; border-radius: 6px;
-  font-size: 12px; pointer-events: none; }
-body.ui-hidden #panel, body.ui-hidden #camhint { display: none; }
+body.ui-hidden #panel { display: none; }
 </style>
 <script type="importmap">
 {
@@ -75,7 +72,6 @@ body.ui-hidden #panel, body.ui-hidden #camhint { display: none; }
   </div>
   <div id=recent></div>
 </div>
-<div id=camhint></div>
 
 <script type="module">
 import { createScene } from './code/scene.js';
@@ -181,17 +177,8 @@ function buildRecentUI() {
 }
 buildRecentUI();
 
-// Press F to toggle a free-fly camera; a persistent hint advertises it. The
-// scene drives the hint via onFreeCam so it also updates when Esc exits.
-const camHint = document.getElementById('camhint');
-function showCamHint(on) {
-  camHint.textContent = on
-    ? 'Free camera — WASD + E/Q to fly · mouse to look · F or Esc to exit'
-    : 'Press F for free camera';
-}
-showCamHint(false);
-scene.onFreeCam(showCamHint);
-// H hides/shows all the UI (handy for a clean screenshot).
+// Press F to toggle a free-fly camera (documented in the README; no on-screen
+// hint — the view stays clean). H hides/shows all the UI.
 let uiHidden = false;
 addEventListener('keydown', e => {
   const tag = e.target && e.target.tagName;   // don't hijack keys while a control is focused
