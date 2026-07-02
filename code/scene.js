@@ -270,9 +270,10 @@ export function createScene(mount) {
     penDownTarget = !!penDown;
   }
 
+  let penWidthMm = 0.6;
   function inkSegment(ax, ay, bx, by, color) {
     ctx.strokeStyle = color || '#000';
-    ctx.lineWidth = Math.max(1, 0.6 * PXMM);
+    ctx.lineWidth = Math.max(1, penWidthMm * PXMM);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -283,6 +284,7 @@ export function createScene(mount) {
   }
 
   function setPenColor(c) { penBody.material.color.set(c); }
+  function setPenWidth(mm) { penWidthMm = mm; }
   function resetInk() { clearInk(); tex.needsUpdate = true; }
 
   function render(dtMs = 16) {
@@ -313,7 +315,7 @@ export function createScene(mount) {
   });
 
   return {
-    loadArtwork, setPenPose, inkSegment, setPenColor, resetInk, render,
+    loadArtwork, setPenPose, inkSegment, setPenColor, setPenWidth, resetInk, render,
     setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
     paperSize: { w: PAPER_W, h: PAPER_H },

@@ -14,6 +14,8 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 - **Reset** — clear the ink and send the pen home
 - **Speed** — 1× (real time) up to 1000× for the impatient
 - **Plot** — draw all layers, or just one
+- **Pen** — ink thickness, 0.3 mm to 2 mm (locked while a plot is running,
+  like the layer colors)
 - **Layer colors** — pick a pen color per layer before you start (Inkscape layers
   are detected automatically)
 - **🔊** — mute the motor and servo sounds (they only play at 1× speed anyway)
@@ -21,7 +23,9 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
   WASD + E/Q fly you through the scene; press F (or Esc) to return to orbit
 - **H** — hide/show the whole interface (handy for a clean screenshot)
 
-Recently plotted files are remembered so you can replay them.
+Recently plotted files are remembered so you can replay them. On a first
+visit the Recent list starts with a built-in sample, so there's something to
+plot before you have an SVG of your own.
 
 ## Run it locally
 
@@ -40,7 +44,7 @@ is loaded from a CDN, so you'll need to be online the first time.
 
 ## Tests
 
-The plot simulation (`sim.js`) has a small unit-test suite that runs on Node
+The plot simulation (`code/sim.js`) has a small unit-test suite that runs on Node
 with no dependencies:
 
 ```sh

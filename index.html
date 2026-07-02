@@ -60,6 +60,16 @@ body.ui-hidden #panel, body.ui-hidden #camhint { display: none; }
       <label>Plot
         <select id=layerSel><option value=all>All layers</option></select>
       </label>
+      <label>Pen
+        <select id=penSel>
+          <option value=0.3>0.3 mm</option>
+          <option value=0.5>0.5 mm</option>
+          <option value=0.6 selected>0.6 mm</option>
+          <option value=0.7>0.7 mm</option>
+          <option value=1>1.0 mm</option>
+          <option value=2>2.0 mm</option>
+        </select>
+      </label>
     </div>
     <div id=layers></div>
   </div>
@@ -68,10 +78,11 @@ body.ui-hidden #panel, body.ui-hidden #camhint { display: none; }
 <div id=camhint></div>
 
 <script type="module">
-import { createScene } from './scene.js';
-import { extractStrokes } from './plotExtract.js';
-import { PlotSim } from './sim.js';
-import { createAudio } from './audio.js';
+import { createScene } from './code/scene.js';
+import { extractStrokes } from './code/plotExtract.js';
+import { PlotSim } from './code/sim.js';
+import { createAudio } from './code/audio.js';
+import { SAMPLE_SVG } from './code/sample.js';
 
 const scene = createScene(document.getElementById('stage'));
 const sim = new PlotSim();
@@ -129,6 +140,9 @@ function readStored() {
   catch { return []; }
 }
 let recentList = readStored();
+// First visit (nothing stored yet): seed the list with a built-in sample so
+// there's something to click. Loading it persists it like any dropped file.
+if (!recentList.length) recentList = [{ name: 'sample.svg', svg: SAMPLE_SVG, t: 0 }];
 
 function persistRecent() {
   let l = recentList.slice();
@@ -238,17 +252,31 @@ muteBtn.addEventListener('click', () => {
 const speedSel = document.getElementById('speedSel');
 const layerSel = document.getElementById('layerSel');
 const layersDiv = document.getElementById('layers');
+const penSel = document.getElementById('penSel');
 
 // Pen-color swatches are disabled while a plot is in progress (you set the
 // colors up front, like loading pens before a real plot). Re-enabled on
 // reset and when the plot finishes.
 function setSwatchesEnabled(on) {
   layersDiv.querySelectorAll('input[type=color]').forEach(el => { el.disabled = !on; });
+  penSel.disabled = !on;   // thickness is a pen property too — locked mid-plot
 }
 
 speedSel.addEventListener('change', () => {
   speed = +speedSel.value;
   audio.setEnabled(speed === 1);   // mute above realtime
+});
+
+// Pen thickness (persisted like the mute setting). Applies to ink drawn from
+// now on; strokes already on the paper are rasterized and keep their width.
+try {
+  const w = localStorage.getItem('plotter3d.penWidth');
+  if (w && [...penSel.options].some(o => o.value === w)) penSel.value = w;
+} catch {}
+scene.setPenWidth(+penSel.value);
+penSel.addEventListener('change', () => {
+  scene.setPenWidth(+penSel.value);
+  try { localStorage.setItem('plotter3d.penWidth', penSel.value); } catch {}
 });
 
 layerSel.addEventListener('change', () => {
