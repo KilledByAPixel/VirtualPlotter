@@ -21,6 +21,7 @@
 #setup input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 #setup select { font-size: 12px; max-width: 110px; }
 #paperSizeSel { max-width: 160px; }
+#paperRow { cursor: default; margin-top: 8px; margin-bottom: 8px; }
 .layer-row select { font-size: 11px; }
 .layer-row .layer-name { flex: 1; min-width: 36px; }
 .layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
@@ -73,14 +74,12 @@ body.ui-hidden #panel { display: none; }
   </div>
   <div id=setup>
     <div id=currentPen></div>
-    <div class=row>
-      <label>
-        <input type=color id=paperColor title="Paper color">
-        Paper
-        <select id=paperTypeSel></select>
-        <select id=paperSizeSel title="Paper size"></select>
-        <button id=paperFresh class=fresh-btn title="Fresh sheet of paper">Fresh</button>
-      </label>
+    <div class=layer-row id=paperRow>
+      <input type=color id=paperColor title="Paper color">
+      <span class=layer-name>Paper</span>
+      <select id=paperTypeSel></select>
+      <select id=paperSizeSel title="Paper size"></select>
+      <button id=paperFresh class=fresh-btn title="Fresh sheet of paper">Fresh</button>
     </div>
     <label class=row style="cursor:pointer">
       <input type=checkbox id=inkSim checked> Ink simulation
