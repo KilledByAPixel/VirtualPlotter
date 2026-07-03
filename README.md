@@ -26,8 +26,10 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
   black card (that's what the gel and metallic pens are for). The color
   picker overrides the sheet color, and the size dropdown swaps in a
   different standard sheet (A5 up to Tabloid) — the machine resizes to fit.
-- **Clock** — elapsed plot time ticks next to the mute button (pausing
-  freezes it; finishing leaves the total showing).
+- **Clock** — estimated plot time ticks next to the mute button: it runs at
+  the simulation speed, so whatever the Speed setting, it approximates how
+  long the plot would take on a real machine (pausing freezes it; finishing
+  leaves the total showing).
 - **Layer colors** — pick a pen color per layer before you start (Inkscape layers
   are detected automatically)
 - **🔊** — mute the motor and servo sounds (they only play at 1× speed anyway)

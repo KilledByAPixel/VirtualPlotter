@@ -80,7 +80,7 @@ body.ui-hidden #panel { display: none; }
       </label>
     </div>
     <label class=row style="cursor:pointer">
-      <input type=checkbox id=inkSim> Ink simulation
+      <input type=checkbox id=inkSim checked> Ink simulation
     </label>
   </div>
   <div id=recent></div>
@@ -137,7 +137,7 @@ const penColor = (id) => penState[id].color || penDef(id).color;
 
 // Last selected pen + ink-simulation flag persist separately from pen state.
 const SETTINGS_KEY = 'plotter3d.settings';
-let settings = { inkSim: false, penId: DEFAULT_PEN };
+let settings = { inkSim: true, penId: DEFAULT_PEN };
 try { settings = { ...settings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; } catch {}
 delete settings.unlimitedInk;   // pre-release flag, superseded by inkSim
 if (!PENS.some(p => p.id === settings.penId)) settings.penId = DEFAULT_PEN;
@@ -446,13 +446,17 @@ muteBtn.addEventListener('click', () => {
   applyMute();
 });
 
-// Plot clock: wall time accumulated while the sim runs (pause freezes it,
-// completion leaves the final time showing).
+// Plot clock: SIMULATED plot time — it advances by dt * speed, so at 100×
+// it runs 100× faster and always approximates how long the plot would take
+// on a real machine at 1×. Pause freezes it; completion leaves the total.
 const plotClock = document.getElementById('plotClock');
 let plotMs = 0;
 function updateClock() {
   const s = Math.floor(plotMs / 1000);
-  plotClock.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  const h = Math.floor(s / 3600);
+  const m = Math.floor(s / 60) % 60;
+  plotClock.textContent = (h ? h + ':' + String(m).padStart(2, '0') : m)
+    + ':' + String(s % 60).padStart(2, '0');
 }
 updateClock();
 
@@ -770,7 +774,7 @@ function loop(now) {
   const dt = Math.min(now - last, 100);   // clamp to avoid post-blur jumps
   last = now;
   if (sim.running) {
-    plotMs += dt;
+    plotMs += dt * speed;   // simulated plot time, not wall time
     updateClock();
     const px = penX, py = penY;
     sim.tick(dt * speed);
