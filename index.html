@@ -574,7 +574,7 @@ const paperSizeSel = document.getElementById('paperSizeSel');
 PAPER_SIZES.forEach(s => {
   const o = document.createElement('option');
   o.value = s.id;
-  o.textContent = `${s.name} ${s.w}×${s.h}mm`;   // e.g. "A4 297×210mm"
+  o.textContent = `${s.name} ${s.h}×${s.w}mm`;   // smaller side first, e.g. "A4 210×297mm"
   paperSizeSel.appendChild(o);
 });
 inkSimBox.checked = settings.inkSim;
