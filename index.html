@@ -176,6 +176,9 @@ function syncPen(id) {
   persistPens();
   scene.setPenLevel(id, penState[id].ink);
 }
+function refreshCarriage() {   // mirror the active pen's current look
+  if (activePenId) scene.setCarriagePen(effDef(activePenId), penColor(activePenId));
+}
 
 let paperSel = { id: DEFAULT_PAPER, color: null, size: DEFAULT_SIZE };
 try { paperSel = { ...paperSel, ...(JSON.parse(localStorage.getItem(PAPER_KEY)) || {}) }; } catch {}
@@ -215,9 +218,12 @@ scene.onHover((u, x, y) => {
     : PAPERS.find(p => p.id === u.id).name;
 });
 scene.onPick((u) => {
-  if (plotLocked()) return;
-  if (u.type === 'pen') selectPen(u.id);
-  else { paperSel = { id: u.id, color: null }; scene.setPaperSelected(u.id); applyPaper(); refreshPanel(); }
+  if (u.type === 'pen') {
+    if (!penLocked()) selectPen(u.id);
+  } else if (!paperLocked()) {
+    paperSel = { ...paperSel, id: u.id, color: null };
+    scene.setPaperSelected(u.id); applyPaper(); refreshPanel();
+  }
 });
 
 // Initial layer assignment: the pen whose ink is nearest the SVG layer color,
@@ -239,12 +245,26 @@ let activePenId = null;      // pen currently in the machine
 let pendingSwap = null;      // {def, col} set by onLayer, consumed by the rAF loop
 let plotActive = false;      // true from Plot start until reset/complete/new-load/filter-change
 let swapping = false;        // true while a physical pen-swap animation is in flight
-const plotLocked = () => plotActive || swapping;
+// Pens unlock whenever the machine isn't actually moving — pausing a plot is
+// exactly when you swap pens, like a real plotter. Paper stays locked for the
+// whole plot (even paused): you can't slide a new sheet under half a drawing.
+const penLocked = () => sim.running || swapping;
+const paperLocked = () => plotActive || swapping;
+let currentLayer = null;     // layer index being plotted (for pause pen swaps)
 
 function assignPen(layerIdx, penId) {
-  if (plotLocked() || !sim.layerInfo?.[layerIdx]) return;
+  if (penLocked() || !sim.layerInfo?.[layerIdx]) return;
   layerPens[layerIdx] = penId;
   sim.layerInfo[layerIdx].color = penColor(penId);  // sim's color follows the pen
+  // Reassigning the layer being plotted (possible while paused) swaps the
+  // machine's pen right away, so resuming continues with the new pen.
+  if (layerIdx === currentLayer && activePenId && penId !== activePenId) {
+    syncPen(activePenId);
+    scene.setPenInCaddy(activePenId, true);
+    activePenId = penId;
+    scene.setPenInCaddy(penId, false);
+    refreshCarriage();
+  }
   buildLayerUI._refresh?.();
 }
 
@@ -259,6 +279,7 @@ sim.onPose = (x, y, down) => {
   }
 };
 sim.onLayer = (i) => {
+  currentLayer = i;
   const id = layerPens[i] ?? DEFAULT_PEN;
   if (id === activePenId) return;
   const prev = activePenId;
@@ -283,9 +304,10 @@ sim.onInk = (ax, ay, bx, by) => {
 sim.onComplete = () => {
   plotActive = false;
   playBtn.textContent = '▶ Plot';
-  setSwatchesEnabled(true);
+  updateControlLocks();
   if (activePenId) syncPen(activePenId);
   if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
+  currentLayer = null;
   refreshPanel();
 };
 
@@ -305,9 +327,10 @@ function loadSvgText(text, name) {
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
-  setSwatchesEnabled(true);
+  updateControlLocks();
   if (activePenId) { syncPen(activePenId); scene.setPenInCaddy(activePenId, true); }
   activePenId = null;
+  currentLayer = null;
   loaded = true;
   plotMs = 0;
   updateClock();
@@ -405,6 +428,7 @@ playBtn.addEventListener('click', () => {
     sim.pause();
     playBtn.textContent = '▶ Plot';
     if (activePenId) syncPen(activePenId);
+    updateControlLocks();        // paused: pens unlock, paper stays locked
     refreshPanel();
   }
   else {
@@ -413,7 +437,7 @@ playBtn.addEventListener('click', () => {
     sim.start();
     audio.resume();              // user gesture — unlock Web Audio
     playBtn.textContent = '❚❚ Pause';
-    setSwatchesEnabled(false);   // pen colors are locked once a plot is running
+    updateControlLocks();        // running: everything locks
   }
 });
 resetBtn.addEventListener('click', () => {
@@ -425,8 +449,9 @@ resetBtn.addEventListener('click', () => {
   sim.reset();
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
-  setSwatchesEnabled(true);
+  updateControlLocks();
   if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
+  currentLayer = null;
   refreshPanel();
 });
 
@@ -543,17 +568,17 @@ const cp = (() => {
   currentPenDiv.appendChild(row);
 
   sw.addEventListener('input', () => {
-    if (plotLocked()) return;
+    if (penLocked()) return;
     penState[selectedPenId].color = sw.value;
     persistPens();
     refreshPanel();
   });
   typeSel.addEventListener('change', () => {
-    if (plotLocked()) { refreshPanel(); return; }
+    if (penLocked()) { refreshPanel(); return; }
     selectPen(closestPenOfStyle(typeSel.value, penColor(selectedPenId)));
   });
   tipSel.addEventListener('change', () => {
-    if (plotLocked()) { refreshPanel(); return; }
+    if (penLocked()) { refreshPanel(); return; }
     const t = parseFloat(tipSel.value);
     if (t === penDef(selectedPenId).tip) delete penState[selectedPenId].tip;
     else penState[selectedPenId].tip = t;
@@ -562,7 +587,7 @@ const cp = (() => {
     refreshPanel();
   });
   fresh.addEventListener('click', () => {
-    if (plotLocked() || !settings.inkSim) return;
+    if (penLocked() || !settings.inkSim) return;
     penSimFor(selectedPenId).refill();
     syncPen(selectedPenId);
     refreshPanel();
@@ -570,14 +595,15 @@ const cp = (() => {
   return { sw, typeSel, tipSel, ink, fresh };
 })();
 
-function setSwatchesEnabled(on) {   // pen/paper setup lock while plotting
-  paperTypeSel.disabled = paperSizeSel.disabled = paperColor.disabled = !on;
-  cp.sw.disabled = cp.typeSel.disabled = cp.tipSel.disabled = !on;
-  cp.fresh.disabled = !on || !settings.inkSim;
+function updateControlLocks() {   // derived from penLocked/paperLocked state
+  const pen = penLocked(), paper = paperLocked();
+  paperTypeSel.disabled = paperSizeSel.disabled = paperColor.disabled = paper;
+  cp.sw.disabled = cp.typeSel.disabled = cp.tipSel.disabled = pen;
+  cp.fresh.disabled = pen || !settings.inkSim;
   for (const r of layerRows) {
-    r.sw.disabled = r.typeSel.disabled = r.tipSel.disabled = !on;
+    r.sw.disabled = r.typeSel.disabled = r.tipSel.disabled = pen;
     // Fresh also grays out when ink simulation is off — it does nothing then.
-    r.fresh.disabled = !on || !settings.inkSim;
+    r.fresh.disabled = pen || !settings.inkSim;
   }
 }
 
@@ -589,7 +615,7 @@ function selectLayer(i) {
 
 function selectPen(id) {
   selectedPenId = id;
-  if (loaded && !plotLocked()) assignPen(selectedLayer, id);
+  if (loaded && !penLocked()) assignPen(selectedLayer, id);
   onPenSelected();
   refreshPanel();
 }
@@ -608,7 +634,7 @@ function refreshPanel() {
     r.typeSel.value = penDef(id).style;
     r.tipSel.value = String(penTip(id));
     r.ink.textContent = Math.round(penSimFor(id).ink * 100) + '%';
-    r.fresh.disabled = plotLocked() || !settings.inkSim;
+    r.fresh.disabled = penLocked() || !settings.inkSim;
   });
   currentPenDiv.style.display = loaded ? 'none' : '';
   if (!loaded) {
@@ -616,7 +642,7 @@ function refreshPanel() {
     cp.typeSel.value = penDef(selectedPenId).style;
     cp.tipSel.value = String(penTip(selectedPenId));
     cp.ink.textContent = Math.round(penSimFor(selectedPenId).ink * 100) + '%';
-    cp.fresh.disabled = plotLocked() || !settings.inkSim;
+    cp.fresh.disabled = penLocked() || !settings.inkSim;
   }
   paperTypeSel.value = paperSel.id;
   paperSizeSel.value = paperSel.size;
@@ -635,7 +661,7 @@ layerSel.addEventListener('change', () => {
   plotActive = false;
   plotMs = 0;
   updateClock();
-  setSwatchesEnabled(true);
+  updateControlLocks();
   sim.setLayerFilter(layerSel.value === 'all' ? null : +layerSel.value);
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
@@ -688,33 +714,35 @@ function buildLayerUI(data) {
 
     row.addEventListener('click', () => selectLayer(i));
     sw.addEventListener('input', () => {
-      if (plotLocked()) return;
+      if (penLocked()) return;
       const id = layerPens[i];
       penState[id].color = sw.value;
       persistPens();
       layerPens.forEach((pid, j) => {   // layers sharing this pen follow it
         if (pid === id) sim.layerInfo[j].color = penColor(pid);
       });
+      if (id === activePenId) refreshCarriage();   // recolored while paused
       refreshPanel();
     });
     typeSel.addEventListener('change', () => {
-      if (plotLocked()) { refreshPanel(); return; }
+      if (penLocked()) { refreshPanel(); return; }
       // Switching type keeps the color intent: nearest pen of the new style.
       assignPen(i, closestPenOfStyle(typeSel.value, penColor(layerPens[i])));
       selectLayer(i);
     });
     tipSel.addEventListener('change', () => {
-      if (plotLocked()) { refreshPanel(); return; }
+      if (penLocked()) { refreshPanel(); return; }
       const id = layerPens[i];
       const t = parseFloat(tipSel.value);
       if (t === penDef(id).tip) delete penState[id].tip;
       else penState[id].tip = t;
       persistPens();
       applyTip(effDef(id), id);
+      if (id === activePenId) refreshCarriage();   // re-girthed while paused
       refreshPanel();
     });
     fresh.addEventListener('click', () => {
-      if (plotLocked() || !settings.inkSim) return;
+      if (penLocked() || !settings.inkSim) return;
       penSimFor(layerPens[i]).refill();
       syncPen(layerPens[i]);
       refreshPanel();
@@ -726,20 +754,20 @@ function buildLayerUI(data) {
 }
 
 paperColor.addEventListener('input', (e) => {
-  if (plotLocked()) return;
+  if (paperLocked()) return;
   paperSel.color = e.target.value;
   applyPaper();
 });
 
 paperTypeSel.addEventListener('change', () => {
-  if (plotLocked()) { refreshPanel(); return; }
+  if (paperLocked()) { refreshPanel(); return; }
   paperSel = { ...paperSel, id: paperTypeSel.value, color: null };
   scene.setPaperSelected(paperSel.id);
   applyPaper();
   refreshPanel();
 });
 paperSizeSel.addEventListener('change', () => {
-  if (plotLocked()) { refreshPanel(); return; }
+  if (paperLocked()) { refreshPanel(); return; }
   paperSel.size = paperSizeSel.value;
   try { localStorage.setItem(PAPER_KEY, JSON.stringify(paperSel)); } catch {}
   // Changing the sheet rebuilds the whole rig: tear the plot down cleanly.
@@ -749,17 +777,18 @@ paperSizeSel.addEventListener('change', () => {
   plotMs = 0;
   updateClock();
   if (activePenId) { syncPen(activePenId); activePenId = null; }
+  currentLayer = null;
   sim.reset();
   applyPaperSize();
   playBtn.textContent = '▶ Plot';
-  setSwatchesEnabled(true);
+  updateControlLocks();
   refreshPanel();
 });
 inkSimBox.addEventListener('change', () => {
   settings.inkSim = inkSimBox.checked;
   persistSettings();
   for (const id in penSims) penSims[id].realistic = settings.inkSim;
-  setSwatchesEnabled(!plotLocked());   // Fresh buttons follow the toggle
+  updateControlLocks();   // Fresh buttons follow the toggle
   refreshPanel();
 });
 
