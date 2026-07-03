@@ -265,7 +265,13 @@ export function createScene(mount) {
 
     paper = new THREE.Mesh(
       new THREE.PlaneGeometry(paperW, paperH),
-      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+      new THREE.MeshStandardMaterial({
+        map: tex, roughness: 0.95,
+        // Bias the paper toward the camera in the depth buffer: zoomed way
+        // out, depth precision can't separate it from the slab top just
+        // beneath, and the blank slab wins pixels (the drawing flickers).
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      }));
     paper.rotation.x = -Math.PI / 2;
     paper.position.y = PAPER_TOP_Y;
     paper.receiveShadow = true;
@@ -274,9 +280,9 @@ export function createScene(mount) {
     slab = new THREE.Mesh(
       new THREE.BoxGeometry(paperW, PAPER_TOP_Y, paperH),
       new THREE.MeshStandardMaterial({ color: paperState.color, roughness: 0.95 }));
-    // Sink the slab a touch so its top face clears the paper plane and its
-    // bottom clears the desk top — coplanar faces z-fight (texture flicker).
-    slab.position.y = PAPER_TOP_Y / 2 - 0.1;
+    // Sink the slab so its top face sits well below the paper plane (0.4mm)
+    // and its bottom hides inside the desk — near-coplanar faces z-fight.
+    slab.position.y = PAPER_TOP_Y / 2 - 0.4;
     slab.receiveShadow = true;
     slab.castShadow = true;
     rig.add(slab);
