@@ -25,6 +25,7 @@
 .layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 .pen-ink { color: #888; font-size: 11px; margin-left: auto; }
 #plotClock { color: #555; font-size: 12px; }
+#paperDims { color: #888; font-size: 11px; white-space: nowrap; }
 #panel button.fresh-btn { padding: 1px 6px; font-size: 11px; margin-right: 0; }
 #recent { margin-top: 10px; display: none; }
 .recent-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
@@ -77,6 +78,7 @@ body.ui-hidden #panel { display: none; }
         <select id=paperTypeSel></select>
         <select id=paperSizeSel title="Paper size"></select>
         <input type=color id=paperColor title="Paper color">
+        <span id=paperDims title="Sheet dimensions"></span>
       </label>
     </div>
     <label class=row style="cursor:pointer">
@@ -628,6 +630,8 @@ function refreshPanel() {
   paperTypeSel.value = paperSel.id;
   paperSizeSel.value = paperSel.size;
   paperColor.value = paperSel.color || paperDef().color;
+  const sz = sizeDef();
+  document.getElementById('paperDims').textContent = sz.w + '×' + sz.h + ' mm';
 }
 buildLayerUI._refresh = refreshPanel;
 
