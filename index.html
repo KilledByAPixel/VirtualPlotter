@@ -176,8 +176,11 @@ function syncPen(id) {
   persistPens();
   scene.setPenLevel(id, penState[id].ink);
 }
-function refreshCarriage() {   // mirror the active pen's current look
-  if (activePenId) scene.setCarriagePen(effDef(activePenId), penColor(activePenId));
+// The layer being plotted owns the ink color; the pen supplies tool + girth.
+const layerColor = (i) => sim.layerInfo?.[i]?.color || '#000000';
+function refreshCarriage() {   // mirror the active pen + layer's current look
+  if (activePenId) scene.setCarriagePen(effDef(activePenId),
+    currentLayer != null ? layerColor(currentLayer) : penColor(activePenId));
 }
 
 let paperSel = { id: DEFAULT_PAPER, color: null, size: DEFAULT_SIZE };
@@ -226,20 +229,6 @@ scene.onPick((u) => {
   }
 });
 
-// Initial layer assignment: the pen whose ink is nearest the SVG layer color,
-// so a red Inkscape layer picks up the red fineliner automatically. Fat tips
-// carry a score penalty so near-ties go to the finer pen — a pure-black layer
-// lands on the 0.5 fineliner, not the black marker, while colors only a
-// marker can match (orange, purple...) still pick up the marker.
-function closestPen(hex) {
-  let best = DEFAULT_PEN, bd = Infinity;
-  for (const p of PENS) {
-    const d = colorDist(hex || '#000000', penColor(p.id)) + tipPenalty(p.id);
-    if (d < bd) { bd = d; best = p.id; }
-  }
-  return best;
-}
-
 let layerPens = [];          // pen id per layer index
 let activePenId = null;      // pen currently in the machine
 let pendingSwap = null;      // {def, col} set by onLayer, consumed by the rAF loop
@@ -255,7 +244,6 @@ let currentLayer = null;     // layer index being plotted (for pause pen swaps)
 function assignPen(layerIdx, penId) {
   if (penLocked() || !sim.layerInfo?.[layerIdx]) return;
   layerPens[layerIdx] = penId;
-  sim.layerInfo[layerIdx].color = penColor(penId);  // sim's color follows the pen
   // Reassigning the layer being plotted (possible while paused) swaps the
   // machine's pen right away, so resuming continues with the new pen.
   if (layerIdx === currentLayer && activePenId && penId !== activePenId) {
@@ -286,7 +274,7 @@ sim.onLayer = (i) => {
   if (prev) { syncPen(prev); scene.setPenInCaddy(prev, true); }
   activePenId = id;
   scene.setPenInCaddy(id, false);              // it's in the machine now
-  const def = effDef(id), col = penColor(id);
+  const def = effDef(id), col = layerColor(i);
   if (speed === 1 && sim.running && prev) {
     pendingSwap = { def, col };
     sim.pause();
@@ -295,11 +283,11 @@ sim.onLayer = (i) => {
     scene.setCarriagePen(def, col);
   }
 };
-sim.onInk = (ax, ay, bx, by) => {
+sim.onInk = (ax, ay, bx, by, c) => {
   const id = activePenId ?? DEFAULT_PEN;
   const def = effDef(id);
   for (const op of penSimFor(id).segment(ax, ay, bx, by))
-    scene.drawOp({ ...op, color: penColor(id), sheen: def.sheen });
+    scene.drawOp({ ...op, color: c, sheen: def.sheen });   // ink = layer color
 };
 sim.onComplete = () => {
   plotActive = false;
@@ -320,10 +308,9 @@ function loadSvgText(text, name) {
   scene.loadArtwork(data.widthMm, data.heightMm);
   sim.load(data.strokes, data.strokeLayers, data.layerInfo,
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
-  layerPens = data.layerInfo.length === 1
-    ? [selectedPenId]
-    : data.layerInfo.map(l => closestPen(l.color));
-  data.layerInfo.forEach((l, i) => { l.color = penColor(layerPens[i]); });
+  // Every layer starts on the selected pen (default: the 0.5 fineliner);
+  // ink colors come straight from the SVG and live on the layers.
+  layerPens = data.layerInfo.map(() => selectedPenId || DEFAULT_PEN);
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
@@ -502,21 +489,13 @@ for (const p of PENS)
   if (!PEN_STYLES.some(s => s.style === p.style))
     PEN_STYLES.push({ style: p.style, label: p.name });
 
-const colorDist = (hexA, hexB) => {
-  const a = parseInt(hexA.slice(1), 16), b = parseInt(hexB.slice(1), 16);
-  return ((a >> 16 & 255) - (b >> 16 & 255)) ** 2
-       + ((a >> 8 & 255) - (b >> 8 & 255)) ** 2
-       + ((a & 255) - (b & 255)) ** 2;
-};
-// Fat tips score worse, so color near-ties resolve to the finer pen.
-const tipPenalty = (id) => (penTip(id) - 0.5) ** 2 * 2000;
-// The pen of a given style whose ink is nearest the wanted color — so
-// switching a layer's pen type keeps its color intent.
-function closestPenOfStyle(style, hex) {
+// Switching pen type picks the pen of that style whose tip is closest to the
+// current one — color lives on the layer, not the pen, so color plays no part.
+function penOfStyle(style, wantTip) {
   let best = null, bd = Infinity;
   for (const p of PENS) {
     if (p.style !== style) continue;
-    const d = colorDist(hex, penColor(p.id)) + tipPenalty(p.id);
+    const d = Math.abs(penTip(p.id) - wantTip);
     if (d < bd) { bd = d; best = p.id; }
   }
   return best || DEFAULT_PEN;
@@ -577,7 +556,7 @@ const cp = (() => {
   });
   typeSel.addEventListener('change', () => {
     if (penLocked()) { refreshPanel(); return; }
-    selectPen(closestPenOfStyle(typeSel.value, penColor(selectedPenId)));
+    selectPen(penOfStyle(typeSel.value, penTip(selectedPenId)));
   });
   tipSel.addEventListener('change', () => {
     if (penLocked()) { refreshPanel(); return; }
@@ -632,7 +611,7 @@ function refreshPanel() {
   layerRows.forEach((r, i) => {
     const id = layerPens[i];
     r.row.classList.toggle('sel', i === selectedLayer);
-    r.sw.value = penColor(id);
+    r.sw.value = layerColor(i);
     r.typeSel.value = penDef(id).style;
     r.tipSel.value = String(penTip(id));
     r.ink.textContent = Math.round(penSimFor(id).ink * 100) + '%';
@@ -717,19 +696,14 @@ function buildLayerUI(data) {
     row.addEventListener('click', () => selectLayer(i));
     sw.addEventListener('input', () => {
       if (penLocked()) return;
-      const id = layerPens[i];
-      penState[id].color = sw.value;
-      persistPens();
-      layerPens.forEach((pid, j) => {   // layers sharing this pen follow it
-        if (pid === id) sim.layerInfo[j].color = penColor(pid);
-      });
-      if (id === activePenId) refreshCarriage();   // recolored while paused
+      sim.layerInfo[i].color = sw.value;   // the layer owns its ink color
+      if (i === currentLayer) refreshCarriage();   // recolored while paused
       refreshPanel();
     });
     typeSel.addEventListener('change', () => {
       if (penLocked()) { refreshPanel(); return; }
-      // Switching type keeps the color intent: nearest pen of the new style.
-      assignPen(i, closestPenOfStyle(typeSel.value, penColor(layerPens[i])));
+      // Switching type picks that style's pen with the nearest tip size.
+      assignPen(i, penOfStyle(typeSel.value, penTip(layerPens[i])));
       selectLayer(i);
     });
     tipSel.addEventListener('change', () => {

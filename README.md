@@ -16,8 +16,9 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 - **Reset** — clear the ink and send the pen home
 - **Speed** — 1× (real time) up to 1000× for the impatient
 - **Plot** — draw all layers, or just one
-- **Pens** — pick a pen in the panel or by clicking one in the caddy. Every
-  pen's ink color and tip size are editable; each has its own line character
+- **Pens** — every layer starts on the 0.5 fineliner with the SVG's own
+  colors; each row edits its layer directly (color, pen type, tip size), or
+  click a pen in the caddy. Each pen type has its own line character
   (the marker blobs, the ballpoint dry-starts, the brush swells) and its ink
   runs down as you plot — levels persist between visits. **Fresh** replaces a
   dead pen, or untick **Ink simulation** for perfect ink with none of that.
