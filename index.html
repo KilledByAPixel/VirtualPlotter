@@ -20,9 +20,9 @@
 .layer-name { color: #333; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #setup input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 #setup select { font-size: 12px; max-width: 110px; }
-#paperSizeSel { max-width: 160px; }
+#setup #paperSizeSel { max-width: 160px; }
 #paperRow { cursor: default; margin-top: 8px; margin-bottom: 8px; }
-.layer-row select { font-size: 11px; }
+#panel .layer-row select { font-size: 11px; }   /* outranks #setup select */
 .layer-row .layer-name { flex: 1; min-width: 36px; }
 .layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 .pen-ink { color: #888; font-size: 11px; margin-left: auto; }
