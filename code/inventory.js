@@ -33,3 +33,14 @@ export const PAPERS = [
   { id: 'black',      name: 'Black card', color: '#181a1c', grain: 0,    bleed: 0 },
 ];
 export const DEFAULT_PAPER = 'bristol';
+
+// Standard sheet sizes, landscape, in mm.
+export const PAPER_SIZES = [
+  { id: 'a5',      name: 'A5',      w: 210, h: 148 },
+  { id: 'a4',      name: 'A4',      w: 297, h: 210 },
+  { id: 'a3',      name: 'A3',      w: 420, h: 297 },
+  { id: 'letter',  name: 'Letter',  w: 279, h: 216 },
+  { id: 'legal',   name: 'Legal',   w: 356, h: 216 },
+  { id: 'tabloid', name: 'Tabloid', w: 432, h: 279 },
+];
+export const DEFAULT_SIZE = 'a4';

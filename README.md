@@ -24,7 +24,10 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 - **Paper** — choose a paper type in the panel or click the stack beside the
   machine: bristol, watercolor (toothy), cheap copy (bleeds a little), or
   black card (that's what the gel and metallic pens are for). The color
-  picker overrides the sheet color.
+  picker overrides the sheet color, and the size dropdown swaps in a
+  different standard sheet (A5 up to Tabloid) — the machine resizes to fit.
+- **Clock** — elapsed plot time ticks next to the mute button (pausing
+  freezes it; finishing leaves the total showing).
 - **Layer colors** — pick a pen color per layer before you start (Inkscape layers
   are detected automatically)
 - **🔊** — mute the motor and servo sounds (they only play at 1× speed anyway)

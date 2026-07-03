@@ -24,6 +24,7 @@
 .layer-row .layer-name { flex: 1; min-width: 36px; }
 .layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 .pen-ink { color: #888; font-size: 11px; margin-left: auto; }
+#plotClock { color: #555; font-size: 12px; }
 #panel button.fresh-btn { padding: 1px 6px; font-size: 11px; margin-right: 0; }
 #recent { margin-top: 10px; display: none; }
 .recent-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
@@ -51,6 +52,7 @@ body.ui-hidden #panel { display: none; }
       <button id=playBtn>▶ Plot</button>
       <button id=resetBtn>Reset</button>
       <button id=muteBtn title="Mute / unmute sound">🔊</button>
+      <span id=plotClock title="Plot time"></span>
     </div>
     <div class=row>
       <label>Speed
@@ -69,9 +71,11 @@ body.ui-hidden #panel { display: none; }
     <div id=layers></div>
   </div>
   <div id=setup>
+    <div id=currentPen></div>
     <div class=row>
       <label>Paper
         <select id=paperTypeSel></select>
+        <select id=paperSizeSel title="Paper size"></select>
         <input type=color id=paperColor title="Paper color">
       </label>
     </div>
@@ -89,7 +93,7 @@ import { extractStrokes } from './code/plotExtract.js';
 import { PlotSim } from './code/sim.js';
 import { createAudio } from './code/audio.js';
 import { SAMPLE_SVG } from './code/sample.js';
-import { PENS, PAPERS, DEFAULT_PEN, DEFAULT_PAPER } from './code/inventory.js';
+import { PENS, PAPERS, PAPER_SIZES, DEFAULT_PEN, DEFAULT_PAPER, DEFAULT_SIZE } from './code/inventory.js';
 import { PenSim, createRng } from './code/penSim.js';
 
 const scene = createScene(document.getElementById('stage'));
@@ -102,6 +106,7 @@ const resetBtn = document.getElementById('resetBtn');
 
 let speed = 1;   // sim time multiplier (set by the Speed control)
 let loaded = false;
+let lastArt = null;   // {w, h} of the loaded artwork, for re-fitting on paper resize
 
 // Pen position is tracked here so the animation loop can derive per-axis speed
 // for the motor sounds; a pen up/down change triggers the servo blip.
@@ -172,15 +177,28 @@ function syncPen(id) {
   scene.setPenLevel(id, penState[id].ink);
 }
 
-let paperSel = { id: DEFAULT_PAPER, color: null };
+let paperSel = { id: DEFAULT_PAPER, color: null, size: DEFAULT_SIZE };
 try { paperSel = { ...paperSel, ...(JSON.parse(localStorage.getItem(PAPER_KEY)) || {}) }; } catch {}
+if (!PAPER_SIZES.some(s => s.id === paperSel.size)) paperSel.size = DEFAULT_SIZE;
 const paperDef = () => PAPERS.find(p => p.id === paperSel.id) || PAPERS[0];
+const sizeDef = () => PAPER_SIZES.find(s => s.id === paperSel.size) || PAPER_SIZES[0];
 function applyPaper() {
   const d = paperDef();
   scene.setPaper({ color: paperSel.color || d.color, grain: d.grain, bleed: d.bleed });
   try { localStorage.setItem(PAPER_KEY, JSON.stringify(paperSel)); } catch {}
 }
 applyPaper();
+function applyPaperSize() {
+  const s = sizeDef();
+  scene.setPaperSize(s.w, s.h);
+  // the rig rebuild forgets the ink gauges and any loaded artwork fit
+  PENS.forEach(p => scene.setPenLevel(p.id, penState[p.id].ink));
+  if (lastArt) scene.loadArtwork(lastArt.w, lastArt.h);
+}
+if (paperSel.size !== DEFAULT_SIZE) {
+  const s = sizeDef();
+  scene.setPaperSize(s.w, s.h);
+}
 
 scene.buildInventory(PENS, PAPERS);
 scene.setPaperSelected(paperSel.id);
@@ -276,6 +294,7 @@ function loadSvgText(text, name) {
   try { data = extractStrokes(text); }
   catch (e) { hint.textContent = 'Could not parse that SVG.'; hint.style.display = ''; return; }
   if (!data.strokes.length) { hint.textContent = 'No strokes found in that SVG.'; hint.style.display = ''; return; }
+  lastArt = { w: data.widthMm, h: data.heightMm };
   scene.loadArtwork(data.widthMm, data.heightMm);
   sim.load(data.strokes, data.strokeLayers, data.layerInfo,
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
@@ -290,6 +309,8 @@ function loadSvgText(text, name) {
   if (activePenId) { syncPen(activePenId); scene.setPenInCaddy(activePenId, true); }
   activePenId = null;
   loaded = true;
+  plotMs = 0;
+  updateClock();
   hint.style.display = 'none';
   controls.style.display = '';
   playBtn.textContent = '▶ Plot';
@@ -387,7 +408,7 @@ playBtn.addEventListener('click', () => {
     refreshPanel();
   }
   else {
-    if (sim.isComplete()) { sim.reset(); scene.resetInk(); }
+    if (sim.isComplete()) { sim.reset(); scene.resetInk(); plotMs = 0; }
     plotActive = true;
     sim.start();
     audio.resume();              // user gesture — unlock Web Audio
@@ -399,6 +420,8 @@ resetBtn.addEventListener('click', () => {
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
+  plotMs = 0;
+  updateClock();
   sim.reset();
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
@@ -422,6 +445,16 @@ muteBtn.addEventListener('click', () => {
   try { localStorage.setItem('plotter3d.muted', muted ? '1' : '0'); } catch {}
   applyMute();
 });
+
+// Plot clock: wall time accumulated while the sim runs (pause freezes it,
+// completion leaves the final time showing).
+const plotClock = document.getElementById('plotClock');
+let plotMs = 0;
+function updateClock() {
+  const s = Math.floor(plotMs / 1000);
+  plotClock.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+updateClock();
 
 const speedSel = document.getElementById('speedSel');
 const layerSel = document.getElementById('layerSel');
@@ -463,10 +496,80 @@ PAPERS.forEach(p => {
   o.value = p.id; o.textContent = p.name;
   paperTypeSel.appendChild(o);
 });
+const paperSizeSel = document.getElementById('paperSizeSel');
+PAPER_SIZES.forEach(s => {
+  const o = document.createElement('option');
+  o.value = s.id; o.textContent = s.name;
+  paperSizeSel.appendChild(o);
+});
 inkSimBox.checked = settings.inkSim;
 
+// Before an SVG loads there are no layer rows, so a single "current pen" row
+// shows the selected pen (caddy clicks land here); it hides once layers exist.
+const currentPenDiv = document.getElementById('currentPen');
+const cp = (() => {
+  const row = document.createElement('div');
+  row.className = 'layer-row sel';
+  const sw = document.createElement('input');
+  sw.type = 'color'; sw.title = 'Ink color';
+  const name = document.createElement('span');
+  name.className = 'layer-name';
+  name.textContent = 'Pen';
+  const typeSel = document.createElement('select');
+  typeSel.title = 'Pen type';
+  for (const s of PEN_STYLES) {
+    const o = document.createElement('option');
+    o.value = s.style; o.textContent = s.label;
+    typeSel.appendChild(o);
+  }
+  const tipSel = document.createElement('select');
+  tipSel.title = 'Tip size (mm)';
+  for (const t of TIP_SIZES) {
+    const o = document.createElement('option');
+    o.value = String(t); o.textContent = t.toFixed(1);
+    tipSel.appendChild(o);
+  }
+  const ink = document.createElement('span');
+  ink.className = 'pen-ink';
+  const fresh = document.createElement('button');
+  fresh.className = 'fresh-btn';
+  fresh.textContent = 'Fresh';
+  fresh.title = 'Swap in a fresh pen';
+  row.append(sw, name, typeSel, tipSel, ink, fresh);
+  currentPenDiv.appendChild(row);
+
+  sw.addEventListener('input', () => {
+    if (plotLocked()) return;
+    penState[selectedPenId].color = sw.value;
+    persistPens();
+    refreshPanel();
+  });
+  typeSel.addEventListener('change', () => {
+    if (plotLocked()) { refreshPanel(); return; }
+    selectPen(closestPenOfStyle(typeSel.value, penColor(selectedPenId)));
+  });
+  tipSel.addEventListener('change', () => {
+    if (plotLocked()) { refreshPanel(); return; }
+    const t = parseFloat(tipSel.value);
+    if (t === penDef(selectedPenId).tip) delete penState[selectedPenId].tip;
+    else penState[selectedPenId].tip = t;
+    persistPens();
+    applyTip(effDef(selectedPenId), selectedPenId);
+    refreshPanel();
+  });
+  fresh.addEventListener('click', () => {
+    if (plotLocked() || !settings.inkSim) return;
+    penSimFor(selectedPenId).refill();
+    syncPen(selectedPenId);
+    refreshPanel();
+  });
+  return { sw, typeSel, tipSel, ink, fresh };
+})();
+
 function setSwatchesEnabled(on) {   // pen/paper setup lock while plotting
-  paperTypeSel.disabled = paperColor.disabled = !on;
+  paperTypeSel.disabled = paperSizeSel.disabled = paperColor.disabled = !on;
+  cp.sw.disabled = cp.typeSel.disabled = cp.tipSel.disabled = !on;
+  cp.fresh.disabled = !on || !settings.inkSim;
   for (const r of layerRows) {
     r.sw.disabled = r.typeSel.disabled = r.tipSel.disabled = !on;
     // Fresh also grays out when ink simulation is off — it does nothing then.
@@ -503,7 +606,16 @@ function refreshPanel() {
     r.ink.textContent = Math.round(penSimFor(id).ink * 100) + '%';
     r.fresh.disabled = plotLocked() || !settings.inkSim;
   });
+  currentPenDiv.style.display = loaded ? 'none' : '';
+  if (!loaded) {
+    cp.sw.value = penColor(selectedPenId);
+    cp.typeSel.value = penDef(selectedPenId).style;
+    cp.tipSel.value = String(penTip(selectedPenId));
+    cp.ink.textContent = Math.round(penSimFor(selectedPenId).ink * 100) + '%';
+    cp.fresh.disabled = plotLocked() || !settings.inkSim;
+  }
   paperTypeSel.value = paperSel.id;
+  paperSizeSel.value = paperSel.size;
   paperColor.value = paperSel.color || paperDef().color;
 }
 buildLayerUI._refresh = refreshPanel;
@@ -517,6 +629,8 @@ layerSel.addEventListener('change', () => {
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
+  plotMs = 0;
+  updateClock();
   setSwatchesEnabled(true);
   sim.setLayerFilter(layerSel.value === 'all' ? null : +layerSel.value);
   scene.resetInk();
@@ -615,9 +729,26 @@ paperColor.addEventListener('input', (e) => {
 
 paperTypeSel.addEventListener('change', () => {
   if (plotLocked()) { refreshPanel(); return; }
-  paperSel = { id: paperTypeSel.value, color: null };
+  paperSel = { ...paperSel, id: paperTypeSel.value, color: null };
   scene.setPaperSelected(paperSel.id);
   applyPaper();
+  refreshPanel();
+});
+paperSizeSel.addEventListener('change', () => {
+  if (plotLocked()) { refreshPanel(); return; }
+  paperSel.size = paperSizeSel.value;
+  try { localStorage.setItem(PAPER_KEY, JSON.stringify(paperSel)); } catch {}
+  // Changing the sheet rebuilds the whole rig: tear the plot down cleanly.
+  scene.cancelSwap();
+  swapping = false;
+  plotActive = false;
+  plotMs = 0;
+  updateClock();
+  if (activePenId) { syncPen(activePenId); activePenId = null; }
+  sim.reset();
+  applyPaperSize();
+  playBtn.textContent = '▶ Plot';
+  setSwatchesEnabled(true);
   refreshPanel();
 });
 inkSimBox.addEventListener('change', () => {
@@ -639,6 +770,8 @@ function loop(now) {
   const dt = Math.min(now - last, 100);   // clamp to avoid post-blur jumps
   last = now;
   if (sim.running) {
+    plotMs += dt;
+    updateClock();
     const px = penX, py = penY;
     sim.tick(dt * speed);
     if (pendingSwap) {

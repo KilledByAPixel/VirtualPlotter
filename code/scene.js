@@ -157,7 +157,7 @@ export function createScene(mount) {
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
   Object.assign(key.shadow.camera,
-    { left: -300, right: 300, top: 300, bottom: -300, near: 10, far: 900 });
+    { left: -460, right: 460, top: 460, bottom: -460, near: 10, far: 900 });
   scene.add(key);
   const fill = new THREE.DirectionalLight('#dce8ff', 0.25);
   fill.position.set(-150, 120, -120);
@@ -172,9 +172,10 @@ export function createScene(mount) {
   scene.add(desk);
 
   // --- paper + ink canvas ---
+  let paperW = PAPER_W, paperH = PAPER_H;   // current sheet, mm (setPaperSize)
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(PAPER_W * PXMM);
-  canvas.height = Math.round(PAPER_H * PXMM);
+  canvas.width = Math.round(paperW * PXMM);
+  canvas.height = Math.round(paperH * PXMM);
   const ctx = canvas.getContext('2d');
   let paperState = { color: '#ffffff', grain: 0, bleed: 0 };
   const clearInk = () => {
@@ -224,116 +225,134 @@ export function createScene(mount) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  const paper = new THREE.Mesh(
-    new THREE.PlaneGeometry(PAPER_W, PAPER_H),
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
-  paper.rotation.x = -Math.PI / 2;
-  paper.position.y = PAPER_TOP_Y;
-  paper.receiveShadow = true;
-  scene.add(paper);
-
-  const slab = new THREE.Mesh(
-    new THREE.BoxGeometry(PAPER_W, PAPER_TOP_Y, PAPER_H),
-    new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95 }));
-  // Sink the slab a touch so its top face clears the paper plane (y=PAPER_TOP_Y)
-  // and its bottom clears the desk top (y=0) — otherwise both pairs are coplanar
-  // and z-fight (the paper texture flickers).
-  slab.position.y = PAPER_TOP_Y / 2 - 0.1;
-  slab.receiveShadow = true;
-  slab.castShadow = true;
-  scene.add(slab);
-
-  // --- machine (cube-built AxiDraw) ---
-  // A few finishes give specular variety: matte painted body/motors, shiny
-  // steel rods/rails, semi-gloss plastic carriage.
+  // --- the rig: everything sized from the sheet ---
+  // Paper, slab, machine, caddy, and paper stack all derive from the current
+  // sheet size, so they live in one `rig` group that buildRig() constructs
+  // and setPaperSize() rebuilds. Shared refs are reassigned on each build.
   const mat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0.1 });
   const matMatte = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.08 });
   const matMetal = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.22, metalness: 0.95 });
   const matGloss = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.30, metalness: 0.25 });
-
   const BEAM_Y = 30;
-  const bodyZ = -PAPER_H / 2 - 50;
 
-  const machine = new THREE.Group();
-  scene.add(machine);
+  let rig = null;
+  let paper, slab, machine, arm, carriage, penGroup, penBody, penTip, armLen;
+  let swap = null;                 // {t, half, def, color, done}
+  let lastCarriage = null;         // last applied carriage pen, re-applied on rebuild
+  const pickables = [];            // meshes with .userData = {type, id}
+  const penGroups = {};            // id -> {group, barrel, inkBar, homeY}
+  const paperSheets = {};          // id -> mesh
+  let selectedPaperId = null;
+  let selectedPenId3d = null;
+  let invPens = null, invPapers = null;
 
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(PAPER_W + 120, 26, 60), matMatte('#2d3138'));
-  body.position.set(0, 13, bodyZ);
-  body.castShadow = true;
-  machine.add(body);
+  function buildRig() {
+    if (rig) {
+      scene.remove(rig);
+      rig.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    }
+    rig = new THREE.Group();
+    scene.add(rig);
+    swap = null;
+    pickables.length = 0;
+    for (const k in penGroups) delete penGroups[k];
+    for (const k in paperSheets) delete paperSheets[k];
 
-  // Back X-rail: a steel rod spanning the width that the arm slides along.
-  const xRail = new THREE.Mesh(
-    new THREE.CylinderGeometry(3, 3, PAPER_W + 120, 20), matMetal('#c8ccd0'));
-  xRail.rotation.z = Math.PI / 2;          // lie along X
-  xRail.position.set(0, BEAM_Y, bodyZ);
-  xRail.castShadow = true;
-  machine.add(xRail);
+    canvas.width = Math.round(paperW * PXMM);
+    canvas.height = Math.round(paperH * PXMM);
+    clearInk();
+    tex.needsUpdate = true;
 
-  {
-      const piece = new THREE.Mesh(
-        new THREE.BoxGeometry(60, 60, 90), matMatte('#2d3138'));
-      piece.position.set(-PAPER_W/2-90, 13, bodyZ);
-      piece.castShadow = true;
-      machine.add(piece);
+    paper = new THREE.Mesh(
+      new THREE.PlaneGeometry(paperW, paperH),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+    paper.rotation.x = -Math.PI / 2;
+    paper.position.y = PAPER_TOP_Y;
+    paper.receiveShadow = true;
+    rig.add(paper);
+
+    slab = new THREE.Mesh(
+      new THREE.BoxGeometry(paperW, PAPER_TOP_Y, paperH),
+      new THREE.MeshStandardMaterial({ color: paperState.color, roughness: 0.95 }));
+    // Sink the slab a touch so its top face clears the paper plane and its
+    // bottom clears the desk top — coplanar faces z-fight (texture flicker).
+    slab.position.y = PAPER_TOP_Y / 2 - 0.1;
+    slab.receiveShadow = true;
+    slab.castShadow = true;
+    rig.add(slab);
+
+    // --- machine (cube-built AxiDraw), sized to span the sheet ---
+    const bodyZ = -paperH / 2 - 50;
+    machine = new THREE.Group();
+    rig.add(machine);
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(paperW + 120, 26, 60), matMatte('#2d3138'));
+    body.position.set(0, 13, bodyZ);
+    body.castShadow = true;
+    machine.add(body);
+
+    // Back X-rail: a steel rod spanning the width that the arm slides along.
+    const xRail = new THREE.Mesh(
+      new THREE.CylinderGeometry(3, 3, paperW + 120, 20), matMetal('#c8ccd0'));
+    xRail.rotation.z = Math.PI / 2;          // lie along X
+    xRail.position.set(0, BEAM_Y, bodyZ);
+    xRail.castShadow = true;
+    machine.add(xRail);
+
+    const motor = new THREE.Mesh(
+      new THREE.BoxGeometry(60, 60, 90), matMatte('#2d3138'));
+    motor.position.set(-paperW / 2 - 90, 13, bodyZ);
+    motor.castShadow = true;
+    machine.add(motor);
+    const endCap = new THREE.Mesh(
+      new THREE.BoxGeometry(20, 60, 60), matMatte('#2d3138'));
+    endCap.position.set(paperW / 2 + 70, 13, bodyZ);
+    endCap.castShadow = true;
+    machine.add(endCap);
+
+    // The Y-axis arm is a FIXED-LENGTH beam: its front end stays at the pen
+    // and the whole beam slides in X and Z with the head, so the back end
+    // trails off behind the body. Length is generous so it always reaches.
+    armLen = paperH + 200;
+    arm = new THREE.Mesh(
+      new THREE.BoxGeometry(20, 8, armLen), matMetal('#c8ccd0'));
+    arm.position.set(0, BEAM_Y, -armLen / 2);   // front end at z=0
+    arm.castShadow = true;
+    machine.add(arm);
+
+    // carriage rides at the arm's front end; pen lifts within
+    carriage = new THREE.Group();
+    const block = new THREE.Mesh(
+      new THREE.BoxGeometry(22, 14, 14), matGloss('#4a90d9'));
+    block.position.y = BEAM_Y;
+    block.castShadow = true;
+    carriage.add(block);
+
+    penGroup = new THREE.Group();   // origin = pen tip
+    penBody = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.2, 2.2, 36, 16),
+      new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.5 }));
+    penBody.position.y = 6 + 18;           // base at y=6, top at y=42
+    penBody.castShadow = true;
+    penTip = new THREE.Mesh(
+      new THREE.ConeGeometry(2.2, 6, 16), mat('#111'));
+    penTip.rotation.x = Math.PI;           // apex points down
+    penTip.position.y = 3;                 // apex at y=0 (the tip)
+    penGroup.add(penBody);
+    penGroup.add(penTip);
+    carriage.add(penGroup);
+    machine.add(carriage);
+    if (lastCarriage) applyCarriagePen(lastCarriage.def, lastCarriage.color);
+
+    if (invPens) buildInventoryMeshes();
   }
-  {
-      const piece = new THREE.Mesh(
-        new THREE.BoxGeometry(20, 60, 60), matMatte('#2d3138'));
-      piece.position.set(PAPER_W/2+70, 13, bodyZ);
-      piece.castShadow = true;
-      machine.add(piece);
-  }
-
-
-  // The Y-axis arm: a beam cantilevered off the back body that reaches forward
-  // to the pen. It tracks the pen's X AND its front end always sits at the pen,
-  // so the WHOLE beam moves with the head (length is set per frame in
-  // setPenPose). Base depth is 1; setPenPose scales it along Z to span from the
-  // body out to the pen.
-  // The arm is a FIXED-LENGTH beam: its front end stays at the pen and the whole
-  // beam slides in X and Z with the head, so the back end simply trails off out
-  // the back of the machine (it doesn't shrink — it keeps going past the body).
-  // Length is generous so the back always reaches behind the body.
-  const ARM_LEN = PAPER_H + 200;
-  const armGroup = new THREE.Group();
-  machine.add(armGroup);
-
-  const arm = new THREE.Mesh(
-    new THREE.BoxGeometry(20, 8, ARM_LEN), matMetal('#c8ccd0'));
-  arm.position.set(0, BEAM_Y, -ARM_LEN / 2);   // front end at z=0 (paper center)
-  arm.castShadow = true;
-  armGroup.add(arm);
-  
-  // carriage rides along the arm (X with the arm, Z along it); pen lifts within
-  const carriage = new THREE.Group();
-  const block = new THREE.Mesh(
-    new THREE.BoxGeometry(22, 14, 14), matGloss('#4a90d9'));
-  block.position.y = BEAM_Y;
-  block.castShadow = true;
-  carriage.add(block);
-
-  const penGroup = new THREE.Group();   // origin = pen tip
-  const penBody = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.2, 2.2, 36, 16),
-    new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.5 }));
-  penBody.position.y = 6 + 18;           // base at y=6, top at y=42
-  penBody.castShadow = true;
-  const penTip = new THREE.Mesh(
-    new THREE.ConeGeometry(2.2, 6, 16), mat('#111'));
-  penTip.rotation.x = Math.PI;           // apex points down
-  penTip.position.y = 3;                  // apex at y=0 (the tip)
-  penGroup.add(penBody);
-  penGroup.add(penTip);
-  carriage.add(penGroup);
-  machine.add(carriage);
 
   // The pen in the carriage mirrors the assigned pen: barrel color, girth,
   // metallic finish. swapPen raises the head, changes the pen at the top of
   // the lift (the caddy pen blinks out, the old one returns), and drops back.
-  let swap = null;   // {t, half, def, color, done}
   function applyCarriagePen(def, color) {
+    lastCarriage = { def, color };
     const r = def.style === 'marker' ? 4.5 / 2.2 : def.style === 'brush' ? 3.2 / 2.2 : 1;
     penBody.scale.set(r, 1, r);
     penBody.material = def.sheen ? matMetal(color) : matGloss(color);
@@ -345,20 +364,26 @@ export function createScene(mount) {
   }
   function cancelSwap() { swap = null; }   // drop an in-flight swap; done() never fires
 
-  // --- pen caddy + paper stack (the diegetic settings) ---
-  const pickables = [];            // meshes with .userData = {type, id}
-  const penGroups = {};            // id -> {group, barrel, inkBar, homeY}
-  const paperSheets = {};          // id -> mesh
-  let selectedPaperId = null;
+  function setPaperSize(w, h) {
+    paperW = w; paperH = h;
+    fit = { scale: 1, originX: paperW / 2, originY: paperH / 2 };
+    buildRig();
+  }
 
+  // --- pen caddy + paper stack (the diegetic settings) ---
   function buildInventory(pens, papers) {
+    invPens = pens; invPapers = papers;
+    buildInventoryMeshes();
+  }
+
+  function buildInventoryMeshes() {
     const caddy = new THREE.Group();
-    caddy.position.set(PAPER_W / 2 + 115, 0, 30);
-    scene.add(caddy);
+    caddy.position.set(paperW / 2 + 115, 0, 30);
+    rig.add(caddy);
     // Front rack: two rows of five (the core pens). Back rack (rack: 1): one
     // long row behind them — the rainbow marker set.
-    const front = pens.filter(p => !p.rack);
-    const back = pens.filter(p => p.rack);
+    const front = invPens.filter(p => !p.rack);
+    const back = invPens.filter(p => p.rack);
     const trayW = Math.max(100, back.length * 19 + 14);
     const trayD = back.length ? 122 : 90;
     const tray = new THREE.Mesh(new THREE.BoxGeometry(trayW, 14, trayD), matMatte('#5d4a38'));
@@ -370,7 +395,7 @@ export function createScene(mount) {
       if (pen.rack) return [-(back.length - 1) / 2 * 19 + i * 19, -44];
       return [-40 + (i % 5) * 20, back.length ? -8 + ((i / 5) | 0) * 36 : -20 + ((i / 5) | 0) * 40];
     };
-    pens.forEach((pen) => {
+    invPens.forEach((pen) => {
       const i = pen.rack ? back.indexOf(pen) : front.indexOf(pen);
       const [px, pz] = penSpot(pen, i);
       const g = new THREE.Group();
@@ -394,19 +419,24 @@ export function createScene(mount) {
     });
 
     const stack = new THREE.Group();
-    stack.position.set(-PAPER_W / 2 - 130, 0, 40);
-    scene.add(stack);
-    papers.forEach((p, i) => {
+    stack.position.set(-paperW / 2 - 130, 0, 40);
+    rig.add(stack);
+    invPapers.forEach((p, i) => {
       const sheet = new THREE.Mesh(new THREE.BoxGeometry(150, 2, 110),
         matMatte(p.color));
-      sheet.rotation.y = (i - papers.length / 2) * 0.16;
-      sheet.position.set((i % 2 ? 10 : -10), 1 + i * 3.2, (i - papers.length / 2) * 14);
+      sheet.rotation.y = (i - invPapers.length / 2) * 0.16;
+      sheet.position.set((i % 2 ? 10 : -10), 1 + i * 3.2, (i - invPapers.length / 2) * 14);
       sheet.castShadow = sheet.receiveShadow = true;
       sheet.userData = { type: 'paper', id: p.id };
       stack.add(sheet);
       pickables.push(sheet);
       paperSheets[p.id] = sheet;
     });
+
+    // Re-apply selection lifts after a rebuild (fresh meshes forget them).
+    if (paperSheets[selectedPaperId]) paperSheets[selectedPaperId].position.y += 6;
+    const selPen = penGroups[selectedPenId3d];
+    if (selPen) selPen.group.position.y = selPen.homeY + 6;
   }
 
   function setPenLevel(id, frac) {
@@ -424,7 +454,6 @@ export function createScene(mount) {
     if (paperSheets[id]) paperSheets[id].position.y += 6;
   }
 
-  let selectedPenId3d = null;
   function setPenSelected(id) {
     const prev = penGroups[selectedPenId3d];
     if (prev) prev.group.position.y = prev.homeY;
@@ -433,18 +462,20 @@ export function createScene(mount) {
     if (cur) cur.group.position.y = cur.homeY + 6;
   }
 
+  buildRig();
+
   // --- artwork-mm -> world / canvas mapping ---
-  let fit = { scale: 1, originX: PAPER_W / 2, originY: PAPER_H / 2 };
+  let fit = { scale: 1, originX: paperW / 2, originY: paperH / 2 };
   function loadArtwork(artW, artH) {
-    const s = Math.min((PAPER_W - 2 * MARGIN) / artW,
-                       (PAPER_H - 2 * MARGIN) / artH);
+    const s = Math.min((paperW - 2 * MARGIN) / artW,
+                       (paperH - 2 * MARGIN) / artH);
     const fw = artW * s, fh = artH * s;
-    fit = { scale: s, originX: (PAPER_W - fw) / 2, originY: (PAPER_H - fh) / 2 };
+    fit = { scale: s, originX: (paperW - fw) / 2, originY: (paperH - fh) / 2 };
     clearInk();
     tex.needsUpdate = true;
   }
-  const worldX = (ax) => -PAPER_W / 2 + fit.originX + ax * fit.scale;
-  const worldZ = (ay) => -PAPER_H / 2 + fit.originY + ay * fit.scale;
+  const worldX = (ax) => -paperW / 2 + fit.originX + ax * fit.scale;
+  const worldZ = (ay) => -paperH / 2 + fit.originY + ay * fit.scale;
   const cX = (ax) => (fit.originX + ax * fit.scale) * PXMM;
   const cY = (ay) => (fit.originY + ay * fit.scale) * PXMM;
 
@@ -454,7 +485,7 @@ export function createScene(mount) {
     const wx = worldX(ax), wz = worldZ(ay);
     // Fixed-length arm: pin its front end to the pen and slide it in X/Z, so the
     // back end trails off out the back of the machine.
-    arm.position.set(wx, BEAM_Y, wz - ARM_LEN / 2);
+    arm.position.set(wx, BEAM_Y, wz - armLen / 2);
     carriage.position.x = wx;   // pen carriage rides at the front end of the arm
     carriage.position.z = wz;
     penDownTarget = !!penDown;
@@ -543,10 +574,10 @@ export function createScene(mount) {
   });
 
   return {
-    loadArtwork, setPenPose, drawOp, setPaper, resetInk, render,
+    loadArtwork, setPenPose, drawOp, setPaper, setPaperSize, resetInk, render,
     setFreeCam, toggleFreeCam: () => setFreeCam(!freeCam),
     onFreeCam: (fn) => { freeCamCb = fn || (() => {}); },
-    paperSize: { w: PAPER_W, h: PAPER_H },
+    get paperSize() { return { w: paperW, h: paperH }; },
     buildInventory, onPick: f => pickCb = f, onHover: f => hoverCb = f,
     setPenLevel, setPenInCaddy, setPaperSelected, setPenSelected, setCarriagePen, swapPen, cancelSwap,
   };
