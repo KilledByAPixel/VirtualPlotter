@@ -359,7 +359,8 @@ export function createScene(mount) {
   // the lift (the caddy pen blinks out, the old one returns), and drops back.
   function applyCarriagePen(def, color) {
     lastCarriage = { def, color };
-    const r = def.style === 'marker' ? 4.5 / 2.2 : def.style === 'brush' ? 3.2 / 2.2 : 1;
+    const r = def.style === 'marker' ? (def.tip >= 1.5 ? 4.5 : 3.0) / 2.2
+            : def.style === 'brush' ? 3.2 / 2.2 : 1;
     penBody.scale.set(r, 1, r);
     penBody.material = def.sheen ? matMetal(color) : matGloss(color);
     penTip.material = penBody.material;
@@ -406,7 +407,10 @@ export function createScene(mount) {
       const [px, pz] = penSpot(pen, i);
       const g = new THREE.Group();
       g.position.set(px, 14, pz);
-      const r = pen.style === 'marker' ? 4.5 : pen.style === 'brush' ? 3.2 : 2.4;
+      // Barrel girth follows the tip: only fat (2mm) markers get the chunky
+      // barrel; the 1mm rainbow markers are slimmer.
+      const r = pen.style === 'marker' ? (pen.tip >= 1.5 ? 4.5 : 3.0)
+              : pen.style === 'brush' ? 3.2 : 2.4;
       const barrel = new THREE.Mesh(
         new THREE.CylinderGeometry(r, r * 0.8, 38, 14),
         pen.sheen ? matMetal(pen.color) : matGloss(pen.color));

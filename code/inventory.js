@@ -14,15 +14,16 @@ export const PENS = [
   { id: 'gold',    name: 'Metallic',   style: 'metallic',  tip: 1.0, color: '#c9a83c', capacityM: 100, opaque: true, sheen: true },
   { id: 'brush',   name: 'Brush',      style: 'brush',     tip: 1.0, tipMin: 0.5, tipMax: 2.5, color: '#1a1a1a', capacityM: 250 },
   { id: 'ball',    name: 'Ballpoint',  style: 'ballpoint', tip: 0.5, color: '#20336e', capacityM: 500, dryStartMm: 3, skipChance: 0.03 },
-  // A rainbow set of markers; rack 1 = the back row of the caddy.
-  { id: 'mkred',    name: 'Marker', style: 'marker', tip: 2.0, color: '#d92b2b', capacityM: 400, rack: 1 },
-  { id: 'mkorange', name: 'Marker', style: 'marker', tip: 2.0, color: '#e07118', capacityM: 400, rack: 1 },
-  { id: 'mkyellow', name: 'Marker', style: 'marker', tip: 2.0, color: '#e3b81f', capacityM: 400, rack: 1 },
-  { id: 'mkgreen',  name: 'Marker', style: 'marker', tip: 2.0, color: '#2f9e44', capacityM: 400, rack: 1 },
-  { id: 'mkcyan',   name: 'Marker', style: 'marker', tip: 2.0, color: '#17a2b8', capacityM: 400, rack: 1 },
-  { id: 'mkblue',   name: 'Marker', style: 'marker', tip: 2.0, color: '#2b52d9', capacityM: 400, rack: 1 },
-  { id: 'mkpurple', name: 'Marker', style: 'marker', tip: 2.0, color: '#7a2cc4', capacityM: 400, rack: 1 },
-  { id: 'mkpink',   name: 'Marker', style: 'marker', tip: 2.0, color: '#d94bb0', capacityM: 400, rack: 1 },
+  // A rainbow set of 1mm markers; rack 1 = the back row of the caddy.
+  // (The black front-row Marker stays the fat 2mm one.)
+  { id: 'mkred',    name: 'Marker', style: 'marker', tip: 1.0, color: '#d92b2b', capacityM: 400, rack: 1 },
+  { id: 'mkorange', name: 'Marker', style: 'marker', tip: 1.0, color: '#e07118', capacityM: 400, rack: 1 },
+  { id: 'mkyellow', name: 'Marker', style: 'marker', tip: 1.0, color: '#e3b81f', capacityM: 400, rack: 1 },
+  { id: 'mkgreen',  name: 'Marker', style: 'marker', tip: 1.0, color: '#2f9e44', capacityM: 400, rack: 1 },
+  { id: 'mkcyan',   name: 'Marker', style: 'marker', tip: 1.0, color: '#17a2b8', capacityM: 400, rack: 1 },
+  { id: 'mkblue',   name: 'Marker', style: 'marker', tip: 1.0, color: '#2b52d9', capacityM: 400, rack: 1 },
+  { id: 'mkpurple', name: 'Marker', style: 'marker', tip: 1.0, color: '#7a2cc4', capacityM: 400, rack: 1 },
+  { id: 'mkpink',   name: 'Marker', style: 'marker', tip: 1.0, color: '#d94bb0', capacityM: 400, rack: 1 },
 ];
 export const DEFAULT_PEN = 'fine05';
 
