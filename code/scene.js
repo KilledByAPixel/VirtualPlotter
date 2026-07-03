@@ -480,9 +480,15 @@ export function createScene(mount) {
     const s = Math.min((paperW - 2 * MARGIN) / artW,
                        (paperH - 2 * MARGIN) / artH);
     const fw = artW * s, fh = artH * s;
-    fit = { scale: s, originX: (paperW - fw) / 2, originY: (paperH - fh) / 2 };
-    clearInk();
-    tex.needsUpdate = true;
+    const next = { scale: s, originX: (paperW - fw) / 2, originY: (paperH - fh) / 2 };
+    // Same fit (same-size artwork on the same sheet) keeps the existing ink —
+    // you can plot right over what's already there. A different fit would
+    // misregister old ink against new artwork, so the sheet clears.
+    const same = Math.abs(next.scale - fit.scale) < 1e-9
+      && Math.abs(next.originX - fit.originX) < 1e-9
+      && Math.abs(next.originY - fit.originY) < 1e-9;
+    fit = next;
+    if (!same) { clearInk(); tex.needsUpdate = true; }
   }
   const worldX = (ax) => -paperW / 2 + fit.originX + ax * fit.scale;
   const worldZ = (ay) => -paperH / 2 + fit.originY + ay * fit.scale;
