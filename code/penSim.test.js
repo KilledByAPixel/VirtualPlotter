@@ -103,13 +103,36 @@ test('brush width varies smoothly within [tipMin, tipMax]', () => {
     assert.ok(Math.abs(widths[i] - widths[i - 1]) < 0.6, 'no sudden jumps');
 });
 
-test('unlimited ink never depletes and can be toggled', () => {
-  const ps = new PenSim(pen('fine05'), { unlimited: true });
+test('non-realistic (perfect) ink: no depletion, dry starts, skips, or blobs', () => {
+  // rng always 0 would trigger every skip roll if skips were still gated in
+  const ball = new PenSim(pen('ball'), { realistic: false, rng: () => 0 });
+  ball.penDown();
+  assert.equal(ball.segment(0, 0, 1, 0).length, 1, 'no dry start');
+  assert.equal(ball.segment(1, 0, 50, 0).length, 1, 'no random skips');
+
+  const mk = new PenSim(pen('sharpie'), { realistic: false });
+  mk.penDown();
+  assert.equal(mk.segment(0, 0, 0.5, 0)[0].widthMm, 2.0, 'no touch-down blob');
+  mk.segment(0, 0, 100000, 0);            // 100 m of line
+  assert.equal(mk.ink, 1, 'no depletion');
+  mk.realistic = true;
+  mk.segment(0, 0, 1000, 0);
+  assert.ok(mk.ink < 1, 'realism resumes when toggled back on');
+});
+
+test('a half-empty pen with realism off draws at full strength', () => {
+  const ps = new PenSim(pen('fine05'), { ink: 0.05, realistic: false, rng: () => 0 });
   ps.penDown();
-  ps.segment(0, 0, 100000, 0);            // 100 m of line
-  assert.equal(ps.ink, 1);
-  assert.equal(ps.segment(0, 0, 10, 0).length, 1);  // still draws normally
-  ps.unlimited = false;
-  ps.segment(0, 0, 1000, 0);
-  assert.ok(ps.ink < 1, 'depletion resumes when toggled off');
+  const ops = ps.segment(0, 0, 10, 0);
+  assert.equal(ops.length, 1, 'no low-ink skips');
+  assert.equal(ops[0].alpha, 1, 'no low-ink fade');
+  assert.equal(ps.ink, 0.05, 'level frozen');
+});
+
+test('brush swell survives non-realistic mode (character, not a flaw)', () => {
+  const ps = new PenSim(pen('brush'), { realistic: false });
+  ps.penDown();
+  const widths = [];
+  for (let x = 0; x < 200; x += 5) widths.push(ps.segment(x, 0, x + 5, 0)[0].widthMm);
+  assert.ok(new Set(widths.map(w => w.toFixed(3))).size > 3, 'width still varies');
 });

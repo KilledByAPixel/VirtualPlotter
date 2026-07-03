@@ -20,7 +20,7 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
   pen's ink color and tip size are editable; each has its own line character
   (the marker blobs, the ballpoint dry-starts, the brush swells) and its ink
   runs down as you plot — levels persist between visits. **Fresh** replaces a
-  dead pen, or tick **Unlimited ink** to never worry about it.
+  dead pen, or untick **Ink simulation** for perfect ink with none of that.
 - **Paper** — choose a paper type in the panel or click the stack beside the
   machine: bristol, watercolor (toothy), cheap copy (bleeds a little), or
   black card (that's what the gel and metallic pens are for). The color

@@ -20,11 +20,14 @@ const LOW_INK = 0.15;      // below this fraction the line fades and skips
 const REF_TIP = 0.5;       // capacityM is rated at this tip width
 
 export class PenSim {
-  constructor(pen, { ink = 1, rng = createRng(1), unlimited = false } = {}) {
+  constructor(pen, { ink = 1, rng = createRng(1), realistic = true } = {}) {
     this.pen = pen;
     this.ink = ink;
     this.rng = rng;
-    this.unlimited = unlimited;
+    // realistic=false is "perfect ink": no depletion, dry starts, skips,
+    // blobs, or low-ink fade. Deliberate character (brush swell, metallic
+    // sheen) is not a flaw and stays either way.
+    this.realistic = realistic;
     this.strokeMm = 0;     // mm drawn since the last pen-down
     this.drawnMm = 0;      // lifetime mm (drives brush width phase)
   }
@@ -42,18 +45,18 @@ export class PenSim {
     this.strokeMm += len;
     this.drawnMm += len;
 
-    if (!this.unlimited) {
+    if (this.realistic) {
       const spend = (len / 1000 / pen.capacityM) * (pen.tip / REF_TIP);
       this.ink = Math.max(0, this.ink - spend);
+
+      // Dry start: cheap pens need a few mm to get flowing after pen-down.
+      if (pen.dryStartMm && startMm < pen.dryStartMm) return [];
+
+      // Random skips: base chance for cheap pens, rising sharply on low ink.
+      let skip = pen.skipChance || 0;
+      if (this.ink < LOW_INK) skip += 0.5 * (1 - this.ink / LOW_INK);
+      if (skip > 0 && this.rng() < skip) return [];
     }
-
-    // Dry start: cheap pens need a few mm to get flowing after pen-down.
-    if (pen.dryStartMm && startMm < pen.dryStartMm) return [];
-
-    // Random skips: base chance for cheap pens, rising sharply on low ink.
-    let skip = pen.skipChance || 0;
-    if (this.ink < LOW_INK) skip += 0.5 * (1 - this.ink / LOW_INK);
-    if (skip > 0 && this.rng() < skip) return [];
 
     let width = pen.tip;
     if (pen.style === 'brush') {
@@ -61,12 +64,12 @@ export class PenSim {
       const t = this.drawnMm;
       const s = 0.5 + 0.5 * Math.sin(t * 0.09) * Math.sin(t * 0.023 + 2);
       width = pen.tipMin + (pen.tipMax - pen.tipMin) * s;
-    } else if (pen.style === 'marker' && startMm < 1) {
+    } else if (this.realistic && pen.style === 'marker' && startMm < 1) {
       width = pen.tip * 1.4;   // touch-down blob
     }
 
     let alpha = 1;
-    if (this.ink < LOW_INK) alpha *= Math.max(0.15, this.ink / LOW_INK);
+    if (this.realistic && this.ink < LOW_INK) alpha *= Math.max(0.15, this.ink / LOW_INK);
 
     return [{ ax, ay, bx, by, widthMm: width, alpha }];
   }

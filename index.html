@@ -81,7 +81,7 @@ body.ui-hidden #panel { display: none; }
       </label>
     </div>
     <label class=row style="cursor:pointer">
-      <input type=checkbox id=unlimitedInk> Unlimited ink
+      <input type=checkbox id=inkSim checked> Ink simulation
     </label>
   </div>
   <div id=recent></div>
@@ -135,10 +135,14 @@ function persistPens() {
 }
 const penColor = (id) => penState[id].color || penDef(id).color;
 
-// Last selected pen + unlimited-ink flag persist separately from pen state.
+// Last selected pen + ink-simulation flag persist separately from pen state.
 const SETTINGS_KEY = 'plotter3d.settings';
-let settings = { unlimitedInk: false, penId: DEFAULT_PEN };
+let settings = { inkSim: true, penId: DEFAULT_PEN };
 try { settings = { ...settings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; } catch {}
+if ('unlimitedInk' in settings) {   // migrate the short-lived earlier flag
+  settings.inkSim = !settings.unlimitedInk;
+  delete settings.unlimitedInk;
+}
 if (!PENS.some(p => p.id === settings.penId)) settings.penId = DEFAULT_PEN;
 function persistSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
@@ -166,7 +170,7 @@ function applyTip(eff, id) {
 const penSims = {};
 function penSimFor(id) {
   if (!penSims[id]) penSims[id] = new PenSim(effDef(id),
-    { ink: penState[id].ink, rng: createRng(1234), unlimited: settings.unlimitedInk });
+    { ink: penState[id].ink, rng: createRng(1234), realistic: settings.inkSim });
   return penSims[id];
 }
 function syncPen(id) {
@@ -437,7 +441,7 @@ const paperColor = document.getElementById('paperColor');
 const penSel = document.getElementById('penSel');
 const tipSel = document.getElementById('tipSel');
 const paperTypeSel = document.getElementById('paperTypeSel');
-const unlimitedBox = document.getElementById('unlimitedInk');
+const inkSimBox = document.getElementById('inkSim');
 
 PENS.forEach((p, i) => {
   const o = document.createElement('option');
@@ -454,7 +458,7 @@ PAPERS.forEach(p => {
   o.value = p.id; o.textContent = p.name;
   paperTypeSel.appendChild(o);
 });
-unlimitedBox.checked = settings.unlimitedInk;
+inkSimBox.checked = settings.inkSim;
 
 function setSwatchesEnabled(on) {   // pen/paper setup lock while plotting
   for (const el of [penSel, tipSel, paperTypeSel, paperColor,
@@ -572,10 +576,10 @@ paperTypeSel.addEventListener('change', () => {
   applyPaper();
   refreshPanel();
 });
-unlimitedBox.addEventListener('change', () => {
-  settings.unlimitedInk = unlimitedBox.checked;
+inkSimBox.addEventListener('change', () => {
+  settings.inkSim = inkSimBox.checked;
   persistSettings();
-  for (const id in penSims) penSims[id].unlimited = settings.unlimitedInk;
+  for (const id in penSims) penSims[id].realistic = settings.inkSim;
 });
 
 // Startup sync, deferred to here: selectedPenId/refreshPanel are declared

@@ -184,26 +184,35 @@ export function createScene(mount) {
     bakeGrain();
   };
 
-  // Paper tooth: per-pixel luminance jitter scaled by grain, plus a few soft
+  // Paper tooth: luminance jitter in small cells scaled by grain, plus soft
   // blotches on heavy-grain papers (watercolor) so it doesn't read as uniform
-  // noise. Baked once per clear; ink draws over it.
+  // noise. Cells (not single pixels) so mipmapping at viewing distance can't
+  // average the texture away. Baked once per clear; ink draws over it.
   function bakeGrain() {
     const g = paperState.grain;
     if (!g) return;
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const w = canvas.width, h = canvas.height, cell = 3;
+    const img = ctx.getImageData(0, 0, w, h);
     const d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const n = (Math.random() - 0.5) * 34 * g;
-      d[i] += n; d[i + 1] += n; d[i + 2] += n;
+    for (let cy = 0; cy < h; cy += cell) {
+      for (let cx = 0; cx < w; cx += cell) {
+        const n = (Math.random() - 0.5) * 64 * g;
+        for (let y = cy; y < Math.min(cy + cell, h); y++) {
+          let i = (y * w + cx) * 4;
+          for (let x = cx; x < Math.min(cx + cell, w); x++, i += 4) {
+            d[i] += n; d[i + 1] += n; d[i + 2] += n;
+          }
+        }
+      }
     }
     ctx.putImageData(img, 0, 0);
     if (g >= 0.3) {
-      for (let i = 0; i < 14; i++) {
-        const x = Math.random() * canvas.width, y = Math.random() * canvas.height;
-        const r = 60 + Math.random() * 200;
+      for (let i = 0; i < 22; i++) {
+        const x = Math.random() * w, y = Math.random() * h;
+        const r = 50 + Math.random() * 220;
         const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-        grad.addColorStop(0, 'rgba(139,130,114,' + (0.05 * g).toFixed(3) + ')');
-        grad.addColorStop(1, 'rgba(139,130,114,0)');
+        grad.addColorStop(0, 'rgba(133,122,102,' + (0.10 * g).toFixed(3) + ')');
+        grad.addColorStop(1, 'rgba(133,122,102,0)');
         ctx.fillStyle = grad;
         ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
       }
@@ -211,6 +220,9 @@ export function createScene(mount) {
   }
   clearInk();
   const tex = new THREE.CanvasTexture(canvas);
+  // The canvas holds sRGB pixel data; without this flag three.js samples it
+  // as linear and washes everything out (black card rendered gray).
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
   const paper = new THREE.Mesh(
