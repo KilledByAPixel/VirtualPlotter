@@ -227,14 +227,14 @@ scene.onPick((u) => {
 });
 
 // Initial layer assignment: the pen whose ink is nearest the SVG layer color,
-// so a red Inkscape layer picks up the red fineliner automatically.
+// so a red Inkscape layer picks up the red fineliner automatically. Fat tips
+// carry a score penalty so near-ties go to the finer pen — a pure-black layer
+// lands on the 0.5 fineliner, not the black marker, while colors only a
+// marker can match (orange, purple...) still pick up the marker.
 function closestPen(hex) {
-  const v = parseInt((hex || '#000000').slice(1), 16);
-  const r = v >> 16 & 255, g = v >> 8 & 255, b = v & 255;
   let best = DEFAULT_PEN, bd = Infinity;
   for (const p of PENS) {
-    const w = parseInt(penColor(p.id).slice(1), 16);
-    const d = (r - (w >> 16 & 255)) ** 2 + (g - (w >> 8 & 255)) ** 2 + (b - (w & 255)) ** 2;
+    const d = colorDist(hex || '#000000', penColor(p.id)) + tipPenalty(p.id);
     if (d < bd) { bd = d; best = p.id; }
   }
   return best;
@@ -508,13 +508,15 @@ const colorDist = (hexA, hexB) => {
        + ((a >> 8 & 255) - (b >> 8 & 255)) ** 2
        + ((a & 255) - (b & 255)) ** 2;
 };
+// Fat tips score worse, so color near-ties resolve to the finer pen.
+const tipPenalty = (id) => (penTip(id) - 0.5) ** 2 * 2000;
 // The pen of a given style whose ink is nearest the wanted color — so
 // switching a layer's pen type keeps its color intent.
 function closestPenOfStyle(style, hex) {
   let best = null, bd = Infinity;
   for (const p of PENS) {
     if (p.style !== style) continue;
-    const d = colorDist(hex, penColor(p.id));
+    const d = colorDist(hex, penColor(p.id)) + tipPenalty(p.id);
     if (d < bd) { bd = d; best = p.id; }
   }
   return best || DEFAULT_PEN;
