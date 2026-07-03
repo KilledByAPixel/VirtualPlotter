@@ -184,39 +184,38 @@ export function createScene(mount) {
     bakeGrain();
   };
 
-  // Paper tooth: luminance jitter in small cells scaled by grain, plus soft
-  // blotches on heavy-grain papers (watercolor) so it doesn't read as uniform
-  // noise. Cells (not single pixels) so mipmapping at viewing distance can't
-  // average the texture away. Baked once per clear; ink draws over it.
+  // Paper tooth: layered value noise composited with soft-light, so it reads
+  // as organic fiber rather than pixel static. Each octave is a small random
+  // canvas scaled up with smoothing (bilinear), giving soft continuous
+  // variation; three scales overlap like real paper texture. Baked once per
+  // clear; ink draws over it.
   function bakeGrain() {
     const g = paperState.grain;
     if (!g) return;
-    const w = canvas.width, h = canvas.height, cell = 3;
-    const img = ctx.getImageData(0, 0, w, h);
-    const d = img.data;
-    for (let cy = 0; cy < h; cy += cell) {
-      for (let cx = 0; cx < w; cx += cell) {
-        const n = (Math.random() - 0.5) * 64 * g;
-        for (let y = cy; y < Math.min(cy + cell, h); y++) {
-          let i = (y * w + cx) * 4;
-          for (let x = cx; x < Math.min(cx + cell, w); x++, i += 4) {
-            d[i] += n; d[i + 1] += n; d[i + 2] += n;
-          }
-        }
+    const w = canvas.width, h = canvas.height;
+    const octave = (scale, alpha) => {
+      const nw = Math.max(2, Math.ceil(w / scale)), nh = Math.max(2, Math.ceil(h / scale));
+      const nc = document.createElement('canvas');
+      nc.width = nw; nc.height = nh;
+      const nctx = nc.getContext('2d');
+      const img = nctx.createImageData(nw, nh);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const v = 64 + Math.random() * 128;   // mid-gray noise for soft-light
+        d[i] = d[i + 1] = d[i + 2] = v;
+        d[i + 3] = 255;
       }
-    }
-    ctx.putImageData(img, 0, 0);
-    if (g >= 0.3) {
-      for (let i = 0; i < 22; i++) {
-        const x = Math.random() * w, y = Math.random() * h;
-        const r = 50 + Math.random() * 220;
-        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-        grad.addColorStop(0, 'rgba(133,122,102,' + (0.10 * g).toFixed(3) + ')');
-        grad.addColorStop(1, 'rgba(133,122,102,0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
-      }
-    }
+      nctx.putImageData(img, 0, 0);
+      ctx.globalAlpha = alpha;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(nc, 0, 0, w, h);
+    };
+    ctx.globalCompositeOperation = 'soft-light';
+    octave(36, 0.55 * g);   // broad mottling (watercolor pooling)
+    octave(11, 0.45 * g);   // fiber clumps
+    octave(4, 0.35 * g);    // fine tooth
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
   }
   clearInk();
   const tex = new THREE.CanvasTexture(canvas);
@@ -356,15 +355,26 @@ export function createScene(mount) {
     const caddy = new THREE.Group();
     caddy.position.set(PAPER_W / 2 + 115, 0, 30);
     scene.add(caddy);
-    const tray = new THREE.Mesh(new THREE.BoxGeometry(100, 14, 90), matMatte('#5d4a38'));
+    // Front rack: two rows of five (the core pens). Back rack (rack: 1): one
+    // long row behind them — the rainbow marker set.
+    const front = pens.filter(p => !p.rack);
+    const back = pens.filter(p => p.rack);
+    const trayW = Math.max(100, back.length * 19 + 14);
+    const trayD = back.length ? 122 : 90;
+    const tray = new THREE.Mesh(new THREE.BoxGeometry(trayW, 14, trayD), matMatte('#5d4a38'));
     tray.position.y = 7;
     tray.castShadow = tray.receiveShadow = true;
     caddy.add(tray);
 
-    pens.forEach((pen, i) => {
-      const col = i % 5, row = (i / 5) | 0;
+    const penSpot = (pen, i) => {
+      if (pen.rack) return [-(back.length - 1) / 2 * 19 + i * 19, -44];
+      return [-40 + (i % 5) * 20, back.length ? -8 + ((i / 5) | 0) * 36 : -20 + ((i / 5) | 0) * 40];
+    };
+    pens.forEach((pen) => {
+      const i = pen.rack ? back.indexOf(pen) : front.indexOf(pen);
+      const [px, pz] = penSpot(pen, i);
       const g = new THREE.Group();
-      g.position.set(-40 + col * 20, 14, -20 + row * 40);
+      g.position.set(px, 14, pz);
       const r = pen.style === 'marker' ? 4.5 : pen.style === 'brush' ? 3.2 : 2.4;
       const barrel = new THREE.Mesh(
         new THREE.CylinderGeometry(r, r * 0.8, 38, 14),

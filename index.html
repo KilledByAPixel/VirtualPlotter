@@ -22,7 +22,14 @@
 .pen-name { color: #555; font-size: 11px; margin-left: auto; white-space: nowrap; }
 #setup input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 #setup select { font-size: 12px; max-width: 110px; }
-#penReplace { padding: 2px 8px; font-size: 11px; }
+#penList { display: flex; flex-direction: column; gap: 2px; max-height: 200px;
+  overflow-y: auto; margin-bottom: 8px; padding-right: 2px; }
+.pen-row { display: flex; align-items: center; gap: 6px; cursor: pointer;
+  border-radius: 4px; padding: 1px 3px; }
+.pen-row.sel { background: #e3ecf7; }
+.pen-row select { font-size: 11px; }
+.pen-ink { color: #888; font-size: 11px; margin-left: auto; }
+#panel button.fresh-btn { padding: 1px 6px; font-size: 11px; margin-right: 0; }
 #recent { margin-top: 10px; display: none; }
 .recent-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
 .recent-item { display: block; width: 100%; max-width: 220px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; margin: 2px 0; font-size: 12px; cursor: pointer; background: #f3f5f7; border: 1px solid #dde2e6; border-radius: 4px; }
@@ -67,13 +74,7 @@ body.ui-hidden #panel { display: none; }
     <div id=layers></div>
   </div>
   <div id=setup>
-    <div class=row>
-      <input type=color id=penInkColor title="Pen ink color">
-      <select id=penSel title="Pen"></select>
-      <select id=tipSel title="Tip size"></select>
-      <span id=penInfoInk style="color:#888"></span>
-      <button id=penReplace title="Swap in a fresh pen">Fresh</button>
-    </div>
+    <div id=penList></div>
     <div class=row>
       <label>Paper
         <select id=paperTypeSel></select>
@@ -81,7 +82,7 @@ body.ui-hidden #panel { display: none; }
       </label>
     </div>
     <label class=row style="cursor:pointer">
-      <input type=checkbox id=inkSim checked> Ink simulation
+      <input type=checkbox id=inkSim> Ink simulation
     </label>
   </div>
   <div id=recent></div>
@@ -137,12 +138,9 @@ const penColor = (id) => penState[id].color || penDef(id).color;
 
 // Last selected pen + ink-simulation flag persist separately from pen state.
 const SETTINGS_KEY = 'plotter3d.settings';
-let settings = { inkSim: true, penId: DEFAULT_PEN };
+let settings = { inkSim: false, penId: DEFAULT_PEN };
 try { settings = { ...settings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; } catch {}
-if ('unlimitedInk' in settings) {   // migrate the short-lived earlier flag
-  settings.inkSim = !settings.unlimitedInk;
-  delete settings.unlimitedInk;
-}
+delete settings.unlimitedInk;   // pre-release flag, superseded by inkSim
 if (!PENS.some(p => p.id === settings.penId)) settings.penId = DEFAULT_PEN;
 function persistSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
@@ -438,21 +436,65 @@ const layersDiv = document.getElementById('layers');
 let selectedLayer = 0;
 let selectedPenId = settings.penId;      // always a valid pen from startup
 const paperColor = document.getElementById('paperColor');
-const penSel = document.getElementById('penSel');
-const tipSel = document.getElementById('tipSel');
 const paperTypeSel = document.getElementById('paperTypeSel');
 const inkSimBox = document.getElementById('inkSim');
+const penList = document.getElementById('penList');
 
-PENS.forEach((p, i) => {
-  const o = document.createElement('option');
-  o.value = p.id; o.textContent = p.name;
-  penSel.appendChild(o);
-});
-for (const t of TIP_SIZES) {
-  const o = document.createElement('option');
-  o.value = String(t); o.textContent = t.toFixed(1) + ' mm';
-  tipSel.appendChild(o);
+// One row per pen — swatch, name, tip, ink %, Fresh — all editable in place.
+// Clicking anywhere in a row (including its controls) selects that pen.
+const penRows = {};
+for (const p of PENS) {
+  const row = document.createElement('div');
+  row.className = 'pen-row';
+  const sw = document.createElement('input');
+  sw.type = 'color'; sw.title = 'Ink color';
+  const name = document.createElement('span');
+  name.className = 'layer-name';
+  name.textContent = p.name;
+  const tipSel = document.createElement('select');
+  tipSel.title = 'Tip size (mm)';
+  for (const t of TIP_SIZES) {
+    const o = document.createElement('option');
+    o.value = String(t); o.textContent = t.toFixed(1);
+    tipSel.appendChild(o);
+  }
+  const ink = document.createElement('span');
+  ink.className = 'pen-ink';
+  const fresh = document.createElement('button');
+  fresh.className = 'fresh-btn';
+  fresh.textContent = 'Fresh';
+  fresh.title = 'Swap in a fresh pen';
+  row.append(sw, name, tipSel, ink, fresh);
+  penList.appendChild(row);
+  penRows[p.id] = { row, sw, tipSel, ink, fresh };
+
+  row.addEventListener('click', () => selectPen(p.id));
+  sw.addEventListener('input', () => {
+    if (plotLocked()) return;
+    penState[p.id].color = sw.value;
+    persistPens();
+    layerPens.forEach((id, i) => {      // layers holding this pen follow it
+      if (id === p.id) sim.layerInfo[i].color = penColor(id);
+    });
+    refreshPanel();
+  });
+  tipSel.addEventListener('change', () => {
+    if (plotLocked()) { refreshPanel(); return; }
+    const t = parseFloat(tipSel.value);
+    if (t === penDef(p.id).tip) delete penState[p.id].tip;
+    else penState[p.id].tip = t;
+    persistPens();
+    applyTip(effDef(p.id), p.id);
+    refreshPanel();
+  });
+  fresh.addEventListener('click', () => {
+    if (plotLocked() || !settings.inkSim) return;
+    penSimFor(p.id).refill();
+    syncPen(p.id);
+    refreshPanel();
+  });
 }
+
 PAPERS.forEach(p => {
   const o = document.createElement('option');
   o.value = p.id; o.textContent = p.name;
@@ -461,9 +503,13 @@ PAPERS.forEach(p => {
 inkSimBox.checked = settings.inkSim;
 
 function setSwatchesEnabled(on) {   // pen/paper setup lock while plotting
-  for (const el of [penSel, tipSel, paperTypeSel, paperColor,
-    document.getElementById('penInkColor'), document.getElementById('penReplace')])
-    el.disabled = !on;
+  paperTypeSel.disabled = paperColor.disabled = !on;
+  for (const id in penRows) {
+    const r = penRows[id];
+    r.sw.disabled = r.tipSel.disabled = !on;
+    // Fresh also grays out when ink simulation is off — it does nothing then.
+    r.fresh.disabled = !on || !settings.inkSim;
+  }
 }
 
 function selectLayer(i) {
@@ -491,11 +537,14 @@ function refreshPanel() {
     row.querySelector('.dot').style.background = penColor(layerPens[i]);
     row.querySelector('.pen-name').textContent = penDef(layerPens[i]).name;
   });
-  penSel.value = selectedPenId;
-  tipSel.value = String(penTip(selectedPenId));
-  document.getElementById('penInkColor').value = penColor(selectedPenId);
-  document.getElementById('penInfoInk').textContent =
-    Math.round(penSimFor(selectedPenId).ink * 100) + '%';
+  for (const p of PENS) {
+    const r = penRows[p.id];
+    r.row.classList.toggle('sel', p.id === selectedPenId);
+    r.sw.value = penColor(p.id);
+    r.tipSel.value = String(penTip(p.id));
+    r.ink.textContent = Math.round(penSimFor(p.id).ink * 100) + '%';
+    r.fresh.disabled = plotLocked() || !settings.inkSim;
+  }
   paperTypeSel.value = paperSel.id;
   paperColor.value = paperSel.color || paperDef().color;
 }
@@ -538,37 +587,12 @@ function buildLayerUI(data) {
   refreshPanel();
 }
 
-document.getElementById('penInkColor').addEventListener('input', (e) => {
-  if (!selectedPenId || plotLocked()) return;
-  penState[selectedPenId].color = e.target.value;
-  persistPens();
-  layerPens.forEach((id, i) => {      // layers holding this pen follow it
-    if (id === selectedPenId) sim.layerInfo[i].color = penColor(id);
-  });
-  refreshPanel();
-});
-document.getElementById('penReplace').addEventListener('click', () => {
-  if (!selectedPenId || plotLocked()) return;
-  penSimFor(selectedPenId).refill();
-  syncPen(selectedPenId);
-  refreshPanel();
-});
 paperColor.addEventListener('input', (e) => {
   if (plotLocked()) return;
   paperSel.color = e.target.value;
   applyPaper();
 });
 
-penSel.addEventListener('change', () => selectPen(penSel.value));
-tipSel.addEventListener('change', () => {
-  if (plotLocked()) { refreshPanel(); return; }
-  const t = parseFloat(tipSel.value);
-  if (t === penDef(selectedPenId).tip) delete penState[selectedPenId].tip;
-  else penState[selectedPenId].tip = t;
-  persistPens();
-  applyTip(effDef(selectedPenId), selectedPenId);
-  refreshPanel();
-});
 paperTypeSel.addEventListener('change', () => {
   if (plotLocked()) { refreshPanel(); return; }
   paperSel = { id: paperTypeSel.value, color: null };
@@ -580,6 +604,8 @@ inkSimBox.addEventListener('change', () => {
   settings.inkSim = inkSimBox.checked;
   persistSettings();
   for (const id in penSims) penSims[id].realistic = settings.inkSim;
+  setSwatchesEnabled(!plotLocked());   // Fresh buttons follow the toggle
+  refreshPanel();
 });
 
 // Startup sync, deferred to here: selectedPenId/refreshPanel are declared
