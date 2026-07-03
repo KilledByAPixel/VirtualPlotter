@@ -480,15 +480,11 @@ export function createScene(mount) {
     const s = Math.min((paperW - 2 * MARGIN) / artW,
                        (paperH - 2 * MARGIN) / artH);
     const fw = artW * s, fh = artH * s;
-    const next = { scale: s, originX: (paperW - fw) / 2, originY: (paperH - fh) / 2 };
-    // Same fit (same-size artwork on the same sheet) keeps the existing ink —
-    // you can plot right over what's already there. A different fit would
-    // misregister old ink against new artwork, so the sheet clears.
-    const same = Math.abs(next.scale - fit.scale) < 1e-9
-      && Math.abs(next.originX - fit.originX) < 1e-9
-      && Math.abs(next.originY - fit.originY) < 1e-9;
-    fit = next;
-    if (!same) { clearInk(); tex.needsUpdate = true; }
+    // Loading artwork NEVER clears the sheet: existing ink is rasterized in
+    // paper coordinates, so it stays physically where it was drawn — exactly
+    // like real paper. Only paper actions (fresh sheet, new type/color/size)
+    // clear; the fit below only governs where the NEW artwork lands.
+    fit = { scale: s, originX: (paperW - fw) / 2, originY: (paperH - fh) / 2 };
   }
   const worldX = (ax) => -paperW / 2 + fit.originX + ax * fit.scale;
   const worldZ = (ay) => -paperH / 2 + fit.originY + ay * fit.scale;

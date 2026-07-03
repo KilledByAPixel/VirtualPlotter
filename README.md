@@ -14,9 +14,9 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
 
 - **▶ Plot / ❚❚ Pause** — run or pause the drawing
 - **Reset** — rewind the plot and send the pen home. The ink stays on the
-  sheet — plot over it as many times as you like. Loading a same-size SVG
-  keeps the sheet too, so you can layer different drawings; the paper's
-  **Fresh** button (or picking a new sheet/size) is what clears it
+  sheet — plot over it as many times as you like, and loading another SVG
+  keeps the sheet too, so you can layer different drawings. The paper's
+  **Fresh** button (or picking a new sheet/type/size) is what clears it
 - **Speed** — 1× (real time) up to 1000× for the impatient
 - **Plot** — draw all layers, or just one
 - **Pens** — every layer starts with its own fresh 0.5 fineliner in the SVG's
