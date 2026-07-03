@@ -172,17 +172,54 @@ function penSimFor(id) {
     { ink: penState[id].ink, rng: createRng(1234), realistic: settings.inkSim });
   return penSims[id];
 }
-function syncPen(id) {
-  if (!penSims[id]) return;
-  penState[id].ink = penSims[id].ink;
+function syncPen(p) {
+  if (typeof p !== 'string') return;   // custom pens keep their own state
+  if (!penSims[p]) return;
+  penState[p].ink = penSims[p].ink;
   persistPens();
-  scene.setPenLevel(id, penState[id].ink);
+  scene.setPenLevel(p, penState[p].ink);
 }
-// The layer being plotted owns the ink color; the pen supplies tool + girth.
-const layerColor = (i) => sim.layerInfo?.[i]?.color || '#000000';
-function refreshCarriage() {   // mirror the active pen + layer's current look
-  if (activePenId) scene.setCarriagePen(effDef(activePenId),
-    currentLayer != null ? layerColor(currentLayer) : penColor(activePenId));
+// --- pen instances -------------------------------------------------------
+// A layer's pen is either a caddy pen (a string id: shared, persistent ink,
+// physically in the 3D caddy) or a custom pen (an object owned by that layer
+// alone — created at load from the SVG color, or by detaching a caddy pen the
+// moment you customize it). Color is an attribute of the pen either way.
+const isCaddy = (p) => typeof p === 'string';
+const penDefOf = (p) => isCaddy(p) ? effDef(p) : p.def;
+const penColorOf = (p) => isCaddy(p) ? penColor(p) : p.def.color;
+const penTipOf = (p) => isCaddy(p) ? penTip(p) : p.def.tip;
+const penSimOf = (p) => isCaddy(p) ? penSimFor(p) : p.sim;
+
+// baseStyle: pen id or style name to copy behavior fields from.
+function makeCustomPen(style, color, tipMm, ink = 1) {
+  const base = PENS.find(x => x.style === style) || penDef(DEFAULT_PEN);
+  const def = { ...base, color };
+  delete def.rack;
+  const pen = { custom: true, def,
+    sim: new PenSim(def, { ink, rng: createRng(1234), realistic: settings.inkSim }) };
+  setCustomTip(pen, tipMm);
+  return pen;
+}
+function setCustomTip(pen, t) {
+  const base = PENS.find(x => x.style === pen.def.style) || penDef(DEFAULT_PEN);
+  pen.def.tip = t;
+  if (base.tipMin) {          // brush swell scales around the chosen tip
+    pen.def.tipMin = base.tipMin * (t / base.tip);
+    pen.def.tipMax = base.tipMax * (t / base.tip);
+  }
+}
+function setCustomStyle(pen, style) {
+  const base = PENS.find(x => x.style === style) || penDef(DEFAULT_PEN);
+  const keep = { color: pen.def.color, tip: pen.def.tip };
+  // PenSim shares the def object — mutate it in place, don't replace it.
+  for (const k of Object.keys(pen.def)) delete pen.def[k];
+  Object.assign(pen.def, base, { color: keep.color });
+  delete pen.def.rack;
+  setCustomTip(pen, keep.tip);
+}
+
+function refreshCarriage() {   // mirror the active pen's current look
+  if (activePen) scene.setCarriagePen(penDefOf(activePen), penColorOf(activePen));
 }
 
 let paperSel = { id: DEFAULT_PAPER, color: null, size: DEFAULT_SIZE };
@@ -231,8 +268,8 @@ scene.onPick((u) => {
   }
 });
 
-let layerPens = [];          // pen id per layer index
-let activePenId = null;      // pen currently in the machine
+let layerPens = [];          // pen ref (caddy id or custom pen) per layer
+let activePen = null;        // pen ref currently in the machine
 let pendingSwap = null;      // {def, col} set by onLayer, consumed by the rAF loop
 let plotActive = false;      // true from Plot start until reset/complete/new-load/filter-change
 let swapping = false;        // true while a physical pen-swap animation is in flight
@@ -243,19 +280,36 @@ const penLocked = () => sim.running || swapping;
 const paperLocked = () => plotActive || swapping;
 let currentLayer = null;     // layer index being plotted (for pause pen swaps)
 
-function assignPen(layerIdx, penId) {
+function assignPen(layerIdx, penRef) {
   if (penLocked() || !sim.layerInfo?.[layerIdx]) return;
-  layerPens[layerIdx] = penId;
+  layerPens[layerIdx] = penRef;
   // Reassigning the layer being plotted (possible while paused) swaps the
   // machine's pen right away, so resuming continues with the new pen.
-  if (layerIdx === currentLayer && activePenId && penId !== activePenId) {
-    syncPen(activePenId);
-    scene.setPenInCaddy(activePenId, true);
-    activePenId = penId;
-    scene.setPenInCaddy(penId, false);
+  if (layerIdx === currentLayer && activePen && penRef !== activePen) {
+    syncPen(activePen);
+    if (isCaddy(activePen)) scene.setPenInCaddy(activePen, true);
+    activePen = penRef;
+    if (isCaddy(penRef)) scene.setPenInCaddy(penRef, false);
     refreshCarriage();
   }
   buildLayerUI._refresh?.();
+}
+
+// Detach-on-write: customizing a layer that borrows a caddy pen clones it
+// (color, tip, style, current ink) into a pen owned by that layer, leaving
+// the caddy pen and any other layer using it untouched.
+function ownPen(i) {
+  let p = layerPens[i];
+  if (!isCaddy(p)) return p;
+  const clone = makeCustomPen(penDef(p).style, penColor(p), penTip(p), penSimFor(p).ink);
+  layerPens[i] = clone;
+  if (i === currentLayer && activePen === p) {
+    syncPen(p);
+    scene.setPenInCaddy(p, true);   // the borrowed pen goes home
+    activePen = clone;
+  }
+  if (i === selectedLayer) scene.setPenSelected(null);   // no caddy pen to lift
+  return clone;
 }
 
 sim.onPose = (x, y, down) => {
@@ -263,20 +317,20 @@ sim.onPose = (x, y, down) => {
   penX = x; penY = y;
   if (down !== penDownPrev) {
     penDownPrev = down;
-    const ps = activePenId && penSimFor(activePenId);
+    const ps = activePen && penSimOf(activePen);
     if (ps) down ? ps.penDown() : ps.penUp();
     audio.penMove(down);
   }
 };
 sim.onLayer = (i) => {
   currentLayer = i;
-  const id = layerPens[i] ?? DEFAULT_PEN;
-  if (id === activePenId) return;
-  const prev = activePenId;
-  if (prev) { syncPen(prev); scene.setPenInCaddy(prev, true); }
-  activePenId = id;
-  scene.setPenInCaddy(id, false);              // it's in the machine now
-  const def = effDef(id), col = layerColor(i);
+  const p = layerPens[i] ?? DEFAULT_PEN;
+  if (p === activePen) return;
+  const prev = activePen;
+  if (prev) { syncPen(prev); if (isCaddy(prev)) scene.setPenInCaddy(prev, true); }
+  activePen = p;
+  if (isCaddy(p)) scene.setPenInCaddy(p, false);   // it's in the machine now
+  const def = penDefOf(p), col = penColorOf(p);
   if (speed === 1 && sim.running && prev) {
     pendingSwap = { def, col };
     sim.pause();
@@ -285,18 +339,21 @@ sim.onLayer = (i) => {
     scene.setCarriagePen(def, col);
   }
 };
-sim.onInk = (ax, ay, bx, by, c) => {
-  const id = activePenId ?? DEFAULT_PEN;
-  const def = effDef(id);
-  for (const op of penSimFor(id).segment(ax, ay, bx, by))
-    scene.drawOp({ ...op, color: c, sheen: def.sheen });   // ink = layer color
+sim.onInk = (ax, ay, bx, by) => {
+  const p = activePen ?? DEFAULT_PEN;
+  const def = penDefOf(p);
+  for (const op of penSimOf(p).segment(ax, ay, bx, by))
+    scene.drawOp({ ...op, color: penColorOf(p), sheen: def.sheen });
 };
 sim.onComplete = () => {
   plotActive = false;
   playBtn.textContent = '▶ Plot';
   updateControlLocks();
-  if (activePenId) syncPen(activePenId);
-  if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
+  if (activePen) {
+    syncPen(activePen);
+    if (isCaddy(activePen)) scene.setPenInCaddy(activePen, true);
+    activePen = null;
+  }
   currentLayer = null;
   refreshPanel();
 };
@@ -310,15 +367,18 @@ function loadSvgText(text, name) {
   scene.loadArtwork(data.widthMm, data.heightMm);
   sim.load(data.strokes, data.strokeLayers, data.layerInfo,
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
-  // Every layer starts on the selected pen (default: the 0.5 fineliner);
-  // ink colors come straight from the SVG and live on the layers.
-  layerPens = data.layerInfo.map(() => selectedPenId || DEFAULT_PEN);
+  // Every layer gets its OWN fresh pen — a 0.5 fineliner carrying the SVG's
+  // color. Nothing is shared until you deliberately assign a caddy pen.
+  layerPens = data.layerInfo.map(l => makeCustomPen('fineliner', l.color, 0.5));
   scene.cancelSwap();
   swapping = false;
   plotActive = false;
   updateControlLocks();
-  if (activePenId) { syncPen(activePenId); scene.setPenInCaddy(activePenId, true); }
-  activePenId = null;
+  if (activePen) {
+    syncPen(activePen);
+    if (isCaddy(activePen)) scene.setPenInCaddy(activePen, true);
+  }
+  activePen = null;
   currentLayer = null;
   loaded = true;
   plotMs = 0;
@@ -416,7 +476,7 @@ playBtn.addEventListener('click', () => {
   if (sim.running) {
     sim.pause();
     playBtn.textContent = '▶ Plot';
-    if (activePenId) syncPen(activePenId);
+    if (activePen) syncPen(activePen);
     updateControlLocks();        // paused: pens unlock, paper stays locked
     refreshPanel();
   }
@@ -439,7 +499,10 @@ resetBtn.addEventListener('click', () => {
   scene.resetInk();
   playBtn.textContent = '▶ Plot';
   updateControlLocks();
-  if (activePenId) { scene.setPenInCaddy(activePenId, true); activePenId = null; }
+  if (activePen) {
+    if (isCaddy(activePen)) scene.setPenInCaddy(activePen, true);
+    activePen = null;
+  }
   currentLayer = null;
   refreshPanel();
 });
@@ -592,11 +655,13 @@ function updateControlLocks() {   // derived from penLocked/paperLocked state
 
 function selectLayer(i) {
   selectedLayer = i;
-  if (layerPens[i]) { selectedPenId = layerPens[i]; onPenSelected(); }
+  // Lift the caddy pen this layer borrows (custom pens have no 3D body).
+  const p = layerPens[i];
+  scene.setPenSelected(p && isCaddy(p) ? p : null);
   refreshPanel();
 }
 
-function selectPen(id) {
+function selectPen(id) {   // a caddy pen was picked (3D click or pre-load row)
   selectedPenId = id;
   if (loaded && !penLocked()) assignPen(selectedLayer, id);
   onPenSelected();
@@ -611,12 +676,12 @@ function onPenSelected() {
 
 function refreshPanel() {
   layerRows.forEach((r, i) => {
-    const id = layerPens[i];
+    const p = layerPens[i];
     r.row.classList.toggle('sel', i === selectedLayer);
-    r.sw.value = layerColor(i);
-    r.typeSel.value = penDef(id).style;
-    r.tipSel.value = String(penTip(id));
-    r.ink.textContent = Math.round(penSimFor(id).ink * 100) + '%';
+    r.sw.value = penColorOf(p);
+    r.typeSel.value = penDefOf(p).style;
+    r.tipSel.value = String(penTipOf(p));
+    r.ink.textContent = Math.round(penSimOf(p).ink * 100) + '%';
     r.fresh.disabled = penLocked() || !settings.inkSim;
   });
   currentPenDiv.style.display = loaded ? 'none' : '';
@@ -698,32 +763,32 @@ function buildLayerUI(data) {
     layerRows.push({ row, sw, typeSel, tipSel, ink, fresh });
 
     row.addEventListener('click', () => selectLayer(i));
+    // Editing detaches a borrowed caddy pen into this layer's own copy first,
+    // so customizations never touch the caddy pen or other layers.
     sw.addEventListener('input', () => {
       if (penLocked()) return;
-      sim.layerInfo[i].color = sw.value;   // the layer owns its ink color
+      const p = ownPen(i);
+      p.def.color = sw.value;
       if (i === currentLayer) refreshCarriage();   // recolored while paused
       refreshPanel();
     });
     typeSel.addEventListener('change', () => {
       if (penLocked()) { refreshPanel(); return; }
-      // Switching type picks that style's pen with the nearest tip size.
-      assignPen(i, penOfStyle(typeSel.value, penTip(layerPens[i])));
+      setCustomStyle(ownPen(i), typeSel.value);
+      if (i === currentLayer) refreshCarriage();
       selectLayer(i);
     });
     tipSel.addEventListener('change', () => {
       if (penLocked()) { refreshPanel(); return; }
-      const id = layerPens[i];
-      const t = parseFloat(tipSel.value);
-      if (t === penDef(id).tip) delete penState[id].tip;
-      else penState[id].tip = t;
-      persistPens();
-      applyTip(effDef(id), id);
-      if (id === activePenId) refreshCarriage();   // re-girthed while paused
+      setCustomTip(ownPen(i), parseFloat(tipSel.value));
+      if (i === currentLayer) refreshCarriage();   // re-girthed while paused
       refreshPanel();
     });
     fresh.addEventListener('click', () => {
       if (penLocked() || !settings.inkSim) return;
-      penSimFor(layerPens[i]).refill();
+      // Refilling isn't a customization: a shared caddy pen refills for
+      // everyone (and persists), a custom pen just refills.
+      penSimOf(layerPens[i]).refill();
       syncPen(layerPens[i]);
       refreshPanel();
     });
@@ -756,7 +821,7 @@ paperSizeSel.addEventListener('change', () => {
   plotActive = false;
   plotMs = 0;
   updateClock();
-  if (activePenId) { syncPen(activePenId); activePenId = null; }
+  if (activePen) { syncPen(activePen); activePen = null; }
   currentLayer = null;
   sim.reset();
   applyPaperSize();
@@ -768,6 +833,7 @@ inkSimBox.addEventListener('change', () => {
   settings.inkSim = inkSimBox.checked;
   persistSettings();
   for (const id in penSims) penSims[id].realistic = settings.inkSim;
+  layerPens.forEach(p => { if (!isCaddy(p)) p.sim.realistic = settings.inkSim; });
   updateControlLocks();   // Fresh buttons follow the toggle
   refreshPanel();
 });
