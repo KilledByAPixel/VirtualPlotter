@@ -20,6 +20,7 @@
 .layer-name { color: #333; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #setup input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
 #setup select { font-size: 12px; max-width: 110px; }
+#paperSizeSel { max-width: 160px; }
 .layer-row select { font-size: 11px; }
 .layer-row .layer-name { flex: 1; min-width: 36px; }
 .layer-row input[type=color] { width: 18px; height: 18px; padding: 0; border: 1px solid #ccc; background: none; cursor: pointer; }
@@ -572,7 +573,8 @@ PAPERS.forEach(p => {
 const paperSizeSel = document.getElementById('paperSizeSel');
 PAPER_SIZES.forEach(s => {
   const o = document.createElement('option');
-  o.value = s.id; o.textContent = s.name;
+  o.value = s.id;
+  o.textContent = `${s.name} ${s.w}×${s.h}mm`;   // e.g. "A4 297×210mm"
   paperSizeSel.appendChild(o);
 });
 inkSimBox.checked = settings.inkSim;
