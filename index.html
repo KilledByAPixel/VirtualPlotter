@@ -87,6 +87,9 @@ body.ui-hidden #panel { display: none; }
     <label class=row style="cursor:pointer">
       <input type=checkbox id=reusePaper> Reuse paper
     </label>
+    <label class=row style="cursor:pointer">
+      <input type=checkbox id=keepSize> Keep original size
+    </label>
   </div>
   <div id=recent></div>
 </div>
@@ -142,7 +145,7 @@ const penColor = (id) => penState[id].color || penDef(id).color;
 
 // Last selected pen + ink-simulation flag persist separately from pen state.
 const SETTINGS_KEY = 'plotter3d.settings';
-let settings = { inkSim: false, reusePaper: false, penId: DEFAULT_PEN };
+let settings = { inkSim: false, reusePaper: false, keepSize: false, penId: DEFAULT_PEN };
 try { settings = { ...settings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; } catch {}
 delete settings.unlimitedInk;   // pre-release flag, superseded by inkSim
 if (!PENS.some(p => p.id === settings.penId)) settings.penId = DEFAULT_PEN;
@@ -241,7 +244,7 @@ function applyPaperSize() {
   scene.setPaperSize(s.w, s.h);
   // the rig rebuild forgets the ink gauges and any loaded artwork fit
   PENS.forEach(p => scene.setPenLevel(p.id, penState[p.id].ink));
-  if (lastArt) scene.loadArtwork(lastArt.w, lastArt.h);
+  if (lastArt) scene.loadArtwork(lastArt.w, lastArt.h, settings.keepSize);
 }
 if (paperSel.size !== DEFAULT_SIZE) {
   const s = sizeDef();
@@ -367,7 +370,7 @@ function loadSvgText(text, name) {
   catch (e) { hint.textContent = 'Could not parse that SVG.'; hint.style.display = ''; return; }
   if (!data.strokes.length) { hint.textContent = 'No strokes found in that SVG.'; hint.style.display = ''; return; }
   lastArt = { w: data.widthMm, h: data.heightMm };
-  scene.loadArtwork(data.widthMm, data.heightMm);
+  scene.loadArtwork(data.widthMm, data.heightMm, settings.keepSize);
   if (!settings.reusePaper) scene.resetInk();   // new SVG, clean sheet by default
   sim.load(data.strokes, data.strokeLayers, data.layerInfo,
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
@@ -553,6 +556,7 @@ const paperColor = document.getElementById('paperColor');
 const paperTypeSel = document.getElementById('paperTypeSel');
 const inkSimBox = document.getElementById('inkSim');
 const reusePaperBox = document.getElementById('reusePaper');
+const keepSizeBox = document.getElementById('keepSize');
 
 // Pen types for the per-layer selector: one entry per distinct style,
 // labeled by that style's pen name (Fineliner, Marker, ...).
@@ -587,6 +591,7 @@ PAPER_SIZES.forEach(s => {
 });
 inkSimBox.checked = settings.inkSim;
 reusePaperBox.checked = settings.reusePaper;
+keepSizeBox.checked = settings.keepSize;
 
 // Before an SVG loads there are no layer rows, so a single "current pen" row
 // shows the selected pen (caddy clicks land here); it hides once layers exist.
@@ -854,6 +859,20 @@ reusePaperBox.addEventListener('change', () => {
   persistSettings();
   updateControlLocks();   // paper Fresh follows the toggle
   refreshPanel();
+});
+keepSizeBox.addEventListener('change', () => {
+  if (paperLocked()) { keepSizeBox.checked = settings.keepSize; return; }
+  settings.keepSize = keepSizeBox.checked;
+  persistSettings();
+  if (loaded && lastArt) {   // re-fit the loaded artwork under the new rule
+    scene.cancelSwap();
+    swapping = false;
+    sim.reset();
+    plotMs = 0;
+    updateClock();
+    playBtn.textContent = '▶ Plot';
+    scene.loadArtwork(lastArt.w, lastArt.h, settings.keepSize);
+  }
 });
 
 // Startup sync, deferred to here: selectedPenId/refreshPanel are declared

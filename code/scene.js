@@ -476,20 +476,28 @@ export function createScene(mount) {
 
   // --- artwork-mm -> world / canvas mapping ---
   let fit = { scale: 1, originX: paperW / 2, originY: paperH / 2 };
-  function loadArtwork(artW, artH) {
+  // Loading artwork NEVER clears the sheet: existing ink is rasterized in
+  // paper coordinates, so it stays physically where it was drawn — exactly
+  // like real paper. The fit only governs where NEW artwork lands.
+  // keepSize plots at native mm scale from the paper corner (the machine's
+  // home) instead of fit-to-sheet; oversized art then runs into the travel
+  // clamps below, like a real plotter exceeding its limits.
+  function loadArtwork(artW, artH, keepSize = false) {
+    if (keepSize) { fit = { scale: 1, originX: 0, originY: 0 }; return; }
     const s = Math.min((paperW - 2 * MARGIN) / artW,
                        (paperH - 2 * MARGIN) / artH);
     const fw = artW * s, fh = artH * s;
-    // Loading artwork NEVER clears the sheet: existing ink is rasterized in
-    // paper coordinates, so it stays physically where it was drawn — exactly
-    // like real paper. Only paper actions (fresh sheet, new type/color/size)
-    // clear; the fit below only governs where the NEW artwork lands.
     fit = { scale: s, originX: (paperW - fw) / 2, originY: (paperH - fh) / 2 };
   }
-  const worldX = (ax) => -paperW / 2 + fit.originX + ax * fit.scale;
-  const worldZ = (ay) => -paperH / 2 + fit.originY + ay * fit.scale;
-  const cX = (ax) => (fit.originX + ax * fit.scale) * PXMM;
-  const cY = (ay) => (fit.originY + ay * fit.scale) * PXMM;
+  // Each axis clamps independently at the machine's travel limits (the sheet)
+  // — a real plotter's X motor stops at its rail while Y keeps moving, so
+  // out-of-bounds strokes drag along the edge instead of vanishing.
+  const paperMmX = (ax) => Math.min(paperW, Math.max(0, fit.originX + ax * fit.scale));
+  const paperMmY = (ay) => Math.min(paperH, Math.max(0, fit.originY + ay * fit.scale));
+  const worldX = (ax) => -paperW / 2 + paperMmX(ax);
+  const worldZ = (ay) => -paperH / 2 + paperMmY(ay);
+  const cX = (ax) => paperMmX(ax) * PXMM;
+  const cY = (ay) => paperMmY(ay) * PXMM;
 
   let penDownTarget = false;
   let penY = PEN_UP;

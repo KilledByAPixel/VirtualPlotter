@@ -43,6 +43,11 @@ Drag any SVG file onto the page and it loads onto the plotter. Then:
   leaves the total showing).
 - **Layer colors** — pick a pen color per layer before you start (Inkscape layers
   are detected automatically)
+- **Keep original size** — plot the SVG at its native millimeter size from
+  the machine's home corner instead of auto-fitting the sheet. Anything past
+  the edge gets clamped by the machine's travel limits, each axis
+  independently — the pen drags along the edge exactly like a real plotter
+  running out of rail, which is precisely the mistake this lets you preview
 - **🔊** — mute the motor and servo sounds (they only play at 1× speed anyway)
 - **F** — toggle a free-fly camera: the mouse locks for looking around and
   WASD + E/Q fly you through the scene; press F (or Esc) to return to orbit
