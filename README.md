@@ -13,10 +13,11 @@ stepper motors whirring. It doesn't make anything real but it's nice to watch.
 Drag any SVG file onto the page and it loads onto the plotter. Then:
 
 - **▶ Plot / ❚❚ Pause** — run or pause the drawing
-- **Reset** — rewind the plot and send the pen home. The ink stays on the
-  sheet — plot over it as many times as you like, and loading another SVG
-  keeps the sheet too, so you can layer different drawings. The paper's
-  **Fresh** button (or picking a new sheet/type/size) is what clears it
+- **Reset** — rewind the plot and send the pen home (the sheet keeps its ink
+  until the next plot starts). By default every new plot or loaded SVG takes
+  a clean sheet; tick **Reuse paper** to keep the ink instead — plot over it,
+  run layers separately, or stack different SVGs on one sheet, clearing only
+  via the paper's **Fresh** button or by picking a new sheet/type/size
 - **Speed** — 1× (real time) up to 1000× for the impatient
 - **Plot** — draw all layers, or just one
 - **Pens** — every layer starts with its own fresh 0.5 fineliner in the SVG's

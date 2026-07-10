@@ -82,7 +82,10 @@ body.ui-hidden #panel { display: none; }
       <button id=paperFresh class=fresh-btn title="Fresh sheet of paper">Fresh</button>
     </div>
     <label class=row style="cursor:pointer">
-      <input type=checkbox id=inkSim checked> Ink simulation
+      <input type=checkbox id=inkSim> Ink simulation
+    </label>
+    <label class=row style="cursor:pointer">
+      <input type=checkbox id=reusePaper> Reuse paper
     </label>
   </div>
   <div id=recent></div>
@@ -139,7 +142,7 @@ const penColor = (id) => penState[id].color || penDef(id).color;
 
 // Last selected pen + ink-simulation flag persist separately from pen state.
 const SETTINGS_KEY = 'plotter3d.settings';
-let settings = { inkSim: true, penId: DEFAULT_PEN };
+let settings = { inkSim: false, reusePaper: false, penId: DEFAULT_PEN };
 try { settings = { ...settings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; } catch {}
 delete settings.unlimitedInk;   // pre-release flag, superseded by inkSim
 if (!PENS.some(p => p.id === settings.penId)) settings.penId = DEFAULT_PEN;
@@ -365,6 +368,7 @@ function loadSvgText(text, name) {
   if (!data.strokes.length) { hint.textContent = 'No strokes found in that SVG.'; hint.style.display = ''; return; }
   lastArt = { w: data.widthMm, h: data.heightMm };
   scene.loadArtwork(data.widthMm, data.heightMm);
+  if (!settings.reusePaper) scene.resetInk();   // new SVG, clean sheet by default
   sim.load(data.strokes, data.strokeLayers, data.layerInfo,
            { downSpeed: 60, upSpeed: 200, liftMs: 240 });
   // Every layer gets its OWN fresh pen — a 0.5 fineliner carrying the SVG's
@@ -481,7 +485,10 @@ playBtn.addEventListener('click', () => {
     refreshPanel();
   }
   else {
-    if (sim.isComplete()) { sim.reset(); plotMs = 0; }   // ink stays: plot over it
+    if (sim.isComplete()) { sim.reset(); plotMs = 0; }
+    // Starting a NEW plot (not resuming a pause) takes a clean sheet unless
+    // Reuse paper is on — then the ink stays and you plot over it.
+    if (!plotActive && !settings.reusePaper) scene.resetInk();
     plotActive = true;
     sim.start();
     audio.resume();              // user gesture — unlock Web Audio
@@ -545,6 +552,7 @@ let selectedPenId = settings.penId;      // always a valid pen from startup
 const paperColor = document.getElementById('paperColor');
 const paperTypeSel = document.getElementById('paperTypeSel');
 const inkSimBox = document.getElementById('inkSim');
+const reusePaperBox = document.getElementById('reusePaper');
 
 // Pen types for the per-layer selector: one entry per distinct style,
 // labeled by that style's pen name (Fineliner, Marker, ...).
@@ -578,6 +586,7 @@ PAPER_SIZES.forEach(s => {
   paperSizeSel.appendChild(o);
 });
 inkSimBox.checked = settings.inkSim;
+reusePaperBox.checked = settings.reusePaper;
 
 // Before an SVG loads there are no layer rows, so a single "current pen" row
 // shows the selected pen (caddy clicks land here); it hides once layers exist.
@@ -644,7 +653,8 @@ const cp = (() => {
 function updateControlLocks() {   // derived from penLocked/paperLocked state
   const pen = penLocked(), paper = paperLocked();
   paperTypeSel.disabled = paperSizeSel.disabled = paperColor.disabled = paper;
-  document.getElementById('paperFresh').disabled = paper;
+  // Without Reuse paper, sheets clear automatically — Fresh has no job.
+  document.getElementById('paperFresh').disabled = paper || !settings.reusePaper;
   cp.sw.disabled = cp.typeSel.disabled = cp.tipSel.disabled = pen;
   cp.fresh.disabled = pen || !settings.inkSim;
   for (const r of layerRows) {
@@ -837,6 +847,12 @@ inkSimBox.addEventListener('change', () => {
   for (const id in penSims) penSims[id].realistic = settings.inkSim;
   layerPens.forEach(p => { if (!isCaddy(p)) p.sim.realistic = settings.inkSim; });
   updateControlLocks();   // Fresh buttons follow the toggle
+  refreshPanel();
+});
+reusePaperBox.addEventListener('change', () => {
+  settings.reusePaper = reusePaperBox.checked;
+  persistSettings();
+  updateControlLocks();   // paper Fresh follows the toggle
   refreshPanel();
 });
 
